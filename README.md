@@ -22,7 +22,7 @@ It returns `body.films[]` (catalog) and `body.events[]` (showtimes, joined
 on `filmId`). This is unofficial and unstable — Cinema City could change it
 without notice.
 
-Key findings baked into `monitor.py`:
+Key findings baked into `scraper.py`:
 
 - **Sold-out detection**: the `soldOut` flag is unreliable alone (observed
   `false` at <1% seat availability), so `availabilityRatio <= 0` is checked
@@ -57,7 +57,7 @@ All configuration is via environment variables:
 
 ```bash
 docker build -t cinemacity-scraper .
-docker run -d --name cinema-monitor \
+docker run -d --name cinemacity-scraper \
   -e NTFY_TOPIC=your-topic-here \
   -e MOVIE_QUERY=dune \
   -v ./data:/data \
@@ -68,9 +68,9 @@ Or with `docker-compose.yml`:
 
 ```yaml
 services:
-  cinema-monitor:
+  cinemacity-scraper:
     build: .
-    container_name: cinema-monitor
+    container_name: cinemacity-scraper
     restart: unless-stopped
     environment:
       - TZ=Europe/Prague

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cinema City (cinemacity.cz) showtime/availability monitor.
+Cinema City (cinemacity.cz) showtime/availability scraper.
 
 Polls the site's internal data-api-service JSON feed for a given cinema,
 looks for showtimes matching a movie title query, and pushes an ntfy
@@ -58,7 +58,7 @@ BASE_URL = (
 CINEMA_PAGE_URL = f"https://www.cinemacity.cz/cinemas/flora/{CINEMA_ID}"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) cinema-monitor/1.0",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) cinemacity-scraper/1.0",
     "Accept": "application/json",
 }
 
@@ -66,7 +66,7 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
-log = logging.getLogger("cinema-monitor")
+log = logging.getLogger("cinemacity-scraper")
 
 
 # --- State ---------------------------------------------------------------
@@ -225,11 +225,11 @@ def run_once(state: dict) -> None:
 
 def main() -> None:
     log.info(
-        "Starting cinema-monitor: cinema=%s query=%r imax_only=%s interval=%ss",
+        "Starting cinemacity-scraper: cinema=%s query=%r imax_only=%s interval=%ss",
         CINEMA_ID, MOVIE_QUERY, REQUIRE_IMAX, POLL_INTERVAL_SECONDS,
     )
     state = load_state()
-    notify("cinema-monitor started", f"Watching for '{MOVIE_QUERY}' at Praha Flora", priority="low")
+    notify("cinemacity-scraper started", f"Watching for '{MOVIE_QUERY}' at Praha Flora", priority="low")
 
     while True:
         try:
