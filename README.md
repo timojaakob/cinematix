@@ -121,13 +121,15 @@ services:
   (the lowercased TMDb title).
 - **Per-movie settings** — a gear icon on each movie's page opens a dialog
   for its required formats (IMAX/3D/2D), check frequency (2 minutes to 1
-  day, or off), and match text. Match text is editable because Cinema City
-  listings are in Czech, so the auto-derived English title often won't
-  match and needs manual tuning once the film shows up on the site.
-- **Movie detail page** — shows every currently matching showtime for that
-  movie (format, audio language, subtitles, availability %, a working
-  `Book` link), with filters built dynamically from whatever values
-  actually appear in the results.
+  day, or off), match text, and removing the movie from the watch list.
+  Match text is editable because Cinema City listings are in Czech, so the
+  auto-derived English title often won't match and needs manual tuning
+  once the film shows up on the site.
+- **Movie detail page** — shows the TMDb rating alongside runtime/release
+  date, IMDb/TMDb links, and every currently matching showtime (format,
+  audio language, subtitles, availability %, a working `Book` link), with
+  filters built dynamically from whatever values actually appear in the
+  results.
 
 ## Limitations
 
