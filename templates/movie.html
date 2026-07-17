@@ -33,15 +33,56 @@
     flex-shrink: 0; display: flex; align-items: center; justify-content: center;
     color: #555; font-size: 0.75rem; text-align: center; padding: 0.5rem; box-sizing: border-box;
   }
+  .header-info { flex: 1; min-width: 0; }
+  .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
   .header h1 { font-size: 1.3rem; margin: 0 0 0.3rem; }
   .header .meta { color: #999; font-size: 0.85rem; margin-bottom: 0.6rem; }
   .header .overview { font-size: 0.88rem; line-height: 1.5; color: #ccc; }
-  .query-form { display: flex; gap: 0.5rem; align-items: center; }
-  .query-form input[type="text"] {
-    background: #0d0d0d; color: #eee; border: 1px solid #333; border-radius: 6px;
-    padding: 0.4rem 0.6rem; font-size: 0.85rem; width: 200px;
+  .external-links { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
+  .ext-link {
+    color: #6aa8e0; text-decoration: none; font-size: 0.8rem;
+    border: 1px solid #333; border-radius: 5px; padding: 0.2rem 0.6rem;
   }
-  .query-form label { font-size: 0.8rem; color: #999; }
+  .ext-link:hover { border-color: #3b6ea5; background: #1c2b3a; color: #eee; }
+  .icon-btn.icon-only { padding: 0.4rem; flex-shrink: 0; }
+  .icon-btn.icon-only svg { width: 17px; height: 17px; }
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    align-items: center; justify-content: center; z-index: 100; padding: 1rem;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+    padding: 1.1rem 1.4rem 1.4rem; width: 100%; max-width: 420px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .modal-header h2 { margin: 0; font-size: 1rem; color: #ccc; }
+  .modal-close {
+    background: transparent; border: none; color: #999; font-size: 1.2rem; line-height: 1;
+    padding: 0.2rem 0.5rem; border-radius: 5px; cursor: pointer;
+  }
+  .modal-close:hover { color: #eee; background: #262626; }
+  .modal-actions { display: flex; justify-content: flex-end; margin-top: 0.25rem; }
+  .settings-form { display: flex; flex-direction: column; align-items: flex-start; gap: 0.85rem; }
+  .setting-row { display: flex; gap: 0.5rem; align-items: center; }
+  .setting-row label { font-size: 0.8rem; color: #999; }
+  .setting-row input[type="text"], .setting-row select {
+    background: #0d0d0d; color: #eee; border: 1px solid #333; border-radius: 6px;
+    padding: 0.4rem 0.6rem; font-size: 0.85rem;
+  }
+  .setting-row input[type="text"] { width: 200px; }
+  .setting-row select { cursor: pointer; }
+  .format-setting-row { align-items: flex-start; }
+  .format-checkboxes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .setting-hint { margin: -0.5rem 0 0; font-size: 0.75rem; color: #777; }
+  .settings-advanced summary {
+    cursor: pointer; font-size: 0.82rem; color: #6aa8e0; list-style: none; user-select: none;
+  }
+  .settings-advanced summary::-webkit-details-marker { display: none; }
+  .settings-advanced summary::before { content: '▸ '; }
+  .settings-advanced[open] summary::before { content: '▾ '; }
+  .settings-advanced .setting-row { margin-top: 0.6rem; }
   button {
     background: #3b6ea5; color: white; border: none; border-radius: 6px;
     padding: 0.4rem 1rem; font-size: 0.85rem; cursor: pointer;
@@ -101,6 +142,7 @@
   th[data-sort-key] { cursor: pointer; user-select: none; white-space: nowrap; }
   th[data-sort-key]:hover { color: #ccc; }
   th[data-sort-key] .sort-arrow { color: #6aa8e0; margin-left: 0.25rem; }
+  .subtitle-lang { color: #999; font-size: 0.78rem; }
   .sold-out { color: #e06a6a; }
   .avail { color: #7fbf7f; }
   a.book {
@@ -123,25 +165,73 @@
       {% else %}
         <div class="poster-placeholder">{{ movie.title }}</div>
       {% endif %}
-      <div>
-        <h1>{{ movie.title }}</h1>
+      <div class="header-info">
+        <div class="header-title-row">
+          <h1>{{ movie.title }}</h1>
+          <button id="settings-btn" type="button" class="icon-btn icon-only" aria-label="Settings" aria-haspopup="dialog" aria-controls="settings-modal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 13.09H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+        </div>
         <div class="meta">
           {% if movie.runtime %}{{ movie.runtime }} min{% endif %}
           {% if movie.release_date %} · {{ movie.release_date | humandate }}{% endif %}
         </div>
         {% if movie.overview %}<div class="overview">{{ movie.overview }}</div>{% endif %}
+        {% if movie.tmdb_id or movie.imdb_id %}
+        <div class="external-links">
+          {% if movie.tmdb_id %}<a class="ext-link" href="https://www.themoviedb.org/movie/{{ movie.tmdb_id }}" target="_blank" rel="noopener">TMDb</a>{% endif %}
+          {% if movie.imdb_id %}<a class="ext-link" href="https://www.imdb.com/title/{{ movie.imdb_id }}/" target="_blank" rel="noopener">IMDb</a>{% endif %}
+        </div>
+        {% endif %}
       </div>
     </div>
   </section>
 
-  <section>
-    <h2>Settings</h2>
-    <form class="query-form" method="post" action="{{ url_for('update_query', movie_id=movie.id) }}">
-      <label for="query">Match text</label>
-      <input type="text" id="query" name="query" value="{{ movie.query }}">
-      <button type="submit">Save</button>
-    </form>
-  </section>
+  <div id="settings-overlay" class="modal-overlay">
+    <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <div class="modal-header">
+        <h2 id="settings-modal-title">Settings</h2>
+        <button id="settings-close-btn" type="button" class="modal-close" aria-label="Close settings">✕</button>
+      </div>
+      {% set interval = movie.check_interval_seconds | default(120) %}
+      <form id="settings-form" class="settings-form" method="post" action="{{ url_for('update_settings', movie_id=movie.id) }}">
+        <div class="setting-row">
+          <label for="check_interval">Check frequency</label>
+          <select id="check_interval" name="check_interval">
+            {% for seconds, label in check_interval_options %}
+            <option value="{{ seconds }}" {% if interval == seconds %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+            <option value="off" {% if interval is none %}selected{% endif %}>Off</option>
+          </select>
+        </div>
+
+        <div class="setting-row format-setting-row">
+          <label>Formats to check</label>
+          <div class="format-checkboxes">
+            {% for fmt in all_formats %}
+            <label class="day-toggle"><input type="checkbox" name="required_formats" value="{{ fmt }}" {% if fmt in (movie.required_formats or []) %}checked{% endif %}> {{ fmt }}</label>
+            {% endfor %}
+          </div>
+        </div>
+        <p class="setting-hint">No formats selected means no showtimes will match.</p>
+
+        <details class="settings-advanced">
+          <summary>Match text</summary>
+          <div class="setting-row">
+            <label for="query">Match text</label>
+            <input type="text" id="query" name="query" value="{{ movie.query }}">
+          </div>
+        </details>
+
+        <div class="modal-actions">
+          <button id="settings-apply-btn" type="submit" disabled>Apply changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <section>
     <div class="section-head">
@@ -191,6 +281,24 @@
         <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="0" checked> Sun</label>
       </div>
 
+      {% if audio_languages|length > 1 %}
+      <div class="filter-group">
+        <span class="filter-label">Audio</span>
+        {% for lang in audio_languages %}
+        <label class="day-toggle"><input type="checkbox" class="filter-audio-language" data-lang="{{ lang }}" checked> {{ lang }}</label>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if format_options|length > 1 %}
+      <div class="filter-group">
+        <span class="filter-label">Format</span>
+        {% for fmt in format_options %}
+        <label class="day-toggle"><input type="checkbox" class="filter-format" data-format="{{ fmt }}" checked> {{ fmt }}</label>
+        {% endfor %}
+      </div>
+      {% endif %}
+
       <div class="filter-group">
         <button type="button" id="filters-reset" class="reset-btn">Reset filters</button>
       </div>
@@ -200,7 +308,49 @@
   </section>
 
 <script>
+// --- Settings modal ---
+const settingsBtn = document.getElementById('settings-btn');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+const settingsForm = document.getElementById('settings-form');
+const settingsApplyBtn = document.getElementById('settings-apply-btn');
+const settingsFields = Array.from(settingsForm.elements).filter(el => el.name);
+// Keyed by element, not name: several checkboxes share name="required_formats",
+// so a name-keyed map would only remember the last one's initial state.
+const settingsInitial = new Map(settingsFields.map(el => [el, el.type === 'checkbox' ? el.checked : el.value]));
+
+function openSettings() {
+  settingsOverlay.classList.add('open');
+}
+
+function closeSettings() {
+  settingsOverlay.classList.remove('open');
+}
+
+function updateApplyState() {
+  const dirty = settingsFields.some(el => {
+    const current = el.type === 'checkbox' ? el.checked : el.value;
+    return current !== settingsInitial.get(el);
+  });
+  settingsApplyBtn.disabled = !dirty;
+}
+
+settingsBtn.addEventListener('click', openSettings);
+settingsCloseBtn.addEventListener('click', closeSettings);
+settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === settingsOverlay) closeSettings();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) closeSettings();
+});
+for (const el of settingsFields) {
+  el.addEventListener('input', updateApplyState);
+  el.addEventListener('change', updateApplyState);
+}
+
 const lastUpdatedAt = {{ updated_at | tojson }};
+const movieId = {{ movie.id | tojson }};
+const apiStatusUrl = '{{ url_for("api_status") }}?movie_id=' + encodeURIComponent(movieId);
 const btn = document.getElementById('check-now-btn');
 const status = document.getElementById('check-now-status');
 const btnDefaultText = btn.textContent;
@@ -242,7 +392,7 @@ async function waitForResult() {
   setChecking(true);
   for (let i = 0; i < 40; i++) {
     await new Promise(r => setTimeout(r, 2000));
-    const resp = await fetch('{{ url_for("api_status") }}');
+    const resp = await fetch(apiStatusUrl);
     const data = await resp.json();
     if (data.updated_at && data.updated_at !== lastUpdatedAt) {
       window.location.reload();
@@ -258,7 +408,11 @@ btn.addEventListener('click', async () => {
   setChecking(true);
   status.textContent = '';
   try {
-    await fetch('{{ url_for("check_now") }}', { method: 'POST' });
+    await fetch('{{ url_for("check_now") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ movie_id: movieId }),
+    });
   } catch (e) {
     setChecking(false);
     status.textContent = 'Could not reach the scraper.';
@@ -269,7 +423,7 @@ btn.addEventListener('click', async () => {
 
 // If a check (triggered here or elsewhere) is already running when the
 // page loads, reflect that instead of letting the button be clicked again.
-fetch('{{ url_for("api_status") }}')
+fetch(apiStatusUrl)
   .then(r => r.json())
   .then(data => { if (data.checking) waitForResult(); })
   .catch(() => {});
@@ -286,6 +440,8 @@ if (resultsTable) {
   const filterTimeFrom = document.getElementById('filter-time-from');
   const filterTimeTo = document.getElementById('filter-time-to');
   const weekdayCheckboxes = Array.from(document.querySelectorAll('.filter-weekday'));
+  const audioLanguageCheckboxes = Array.from(document.querySelectorAll('.filter-audio-language'));
+  const formatCheckboxes = Array.from(document.querySelectorAll('.filter-format'));
   const filtersToggle = document.getElementById('filters-toggle');
   const filtersPanel = document.getElementById('filters-panel');
   const filtersReset = document.getElementById('filters-reset');
@@ -380,6 +536,16 @@ if (resultsTable) {
     return weekdayCheckboxes.some(cb => cb.checked && parseInt(cb.dataset.day, 10) === day);
   }
 
+  function isSelectedAudioLanguage(row) {
+    if (audioLanguageCheckboxes.length === 0) return true;
+    return audioLanguageCheckboxes.some(cb => cb.checked && cb.dataset.lang === row.dataset.audioLanguage);
+  }
+
+  function isSelectedFormat(row) {
+    if (formatCheckboxes.length === 0) return true;
+    return formatCheckboxes.some(cb => cb.checked && cb.dataset.format === row.dataset.format);
+  }
+
   function updateHeaderIndicators() {
     for (const th of headers) {
       th.querySelector('.sort-arrow')?.remove();
@@ -407,7 +573,9 @@ if (resultsTable) {
       const hidden =
         (filterLowAvail.checked && isLowAvailability(row)) ||
         !isWithinTimeRange(row) ||
-        !isSelectedWeekday(row);
+        !isSelectedWeekday(row) ||
+        !isSelectedAudioLanguage(row) ||
+        !isSelectedFormat(row);
       row.style.display = hidden ? 'none' : '';
       if (!hidden) visibleCount++;
     }
@@ -430,7 +598,7 @@ if (resultsTable) {
     });
   }
 
-  for (const cb of [filterLowAvail, ...weekdayCheckboxes]) {
+  for (const cb of [filterLowAvail, ...weekdayCheckboxes, ...audioLanguageCheckboxes, ...formatCheckboxes]) {
     cb.addEventListener('change', render);
   }
   for (const input of [filterTimeFrom, filterTimeTo]) {
@@ -442,6 +610,8 @@ if (resultsTable) {
     filterTimeFrom.value = '00:00';
     filterTimeTo.value = '23:59';
     for (const cb of weekdayCheckboxes) cb.checked = true;
+    for (const cb of audioLanguageCheckboxes) cb.checked = true;
+    for (const cb of formatCheckboxes) cb.checked = true;
     sortKey = 'availability';
     sortDir = 'desc';
     render();

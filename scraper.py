@@ -28,11 +28,11 @@ import logging
 import os
 import sys
 import threading
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import requests
-from flask import Flask
+from flask import Flask, request
 
 import storage
 
@@ -158,6 +158,7 @@ def extract_events(payload: dict) -> list[dict]:
         movie_name = (film.get("name") or "").strip()
         attrs = ev.get("attributeIds") or []
         attrs_str = " ".join(str(a) for a in attrs).lower()
+        attrs_set = {str(a).lower() for a in attrs}
         auditorium = (ev.get("auditorium") or "").lower()
         auditorium_tiny = (ev.get("auditoriumTinyName") or "").lower()
         availability = ev.get("availabilityRatio")
@@ -174,6 +175,9 @@ def extract_events(payload: dict) -> list[dict]:
                 or IMAX_ATTRIBUTE_TAG in attrs_str
             )
 
+        audio_language, subtitle_language = audio_and_subtitle_languages(ev.get("languages") or {})
+        format_ = detect_format(attrs_set, is_imax)
+
         normalized.append(
             {
                 "event_id": ev.get("id"),
@@ -181,14 +185,63 @@ def extract_events(payload: dict) -> list[dict]:
                 "sold_out": sold_out,
                 "availability": availability,
                 "is_imax": is_imax,
+                "format": format_,
                 "auditorium": ev.get("auditorium"),
                 "auditorium_tiny": ev.get("auditoriumTinyName"),
                 "start_time": ev.get("eventDateTime"),
                 "booking_link": clean_booking_link(ev.get("bookingLink")),
+                "audio_language": audio_language,
+                "subtitle_language": subtitle_language,
                 "raw": ev if DEBUG else None,
             }
         )
     return normalized
+
+
+def detect_format(attrs_set: set[str], is_imax: bool) -> str:
+    """One of storage.FORMAT_OPTIONS. Confirmed live on 2026-07-17 against
+    three weeks of real Flora listings: "3d" and "2d" are used as exact
+    attributeIds tags (never combined with IMAX in the data seen), so IMAX
+    takes priority since it's detected via the more specific auditorium/
+    70-mm signals in is_imax."""
+    if is_imax:
+        return "IMAX"
+    if "3d" in attrs_set:
+        return "3D"
+    return "2D"
+
+
+# Confirmed live on 2026-07-17: each event carries a "languages" object
+# ({"original": [...], "dubbed": [...], "voiceover": [...], "subtitles": [...]},
+# each a list of ISO 639-1 codes) independent of the film-level attributeIds
+# (which just list every language version offered across all showtimes, not
+# this specific one).
+LANGUAGE_NAMES = {
+    "en": "English", "cs": "Czech", "sk": "Slovak", "de": "German", "fr": "French",
+    "es": "Spanish", "it": "Italian", "pl": "Polish", "ru": "Russian", "hu": "Hungarian",
+    "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "pt": "Portuguese", "nl": "Dutch",
+    "sv": "Swedish", "no": "Norwegian", "da": "Danish", "fi": "Finnish", "uk": "Ukrainian",
+}
+
+
+def language_name(code: str | None) -> str | None:
+    if not code:
+        return None
+    return LANGUAGE_NAMES.get(code.lower(), code.upper())
+
+
+def audio_and_subtitle_languages(languages: dict) -> tuple[str | None, str | None]:
+    """What the audience actually hears is the dub/voiceover if one was
+    recorded for this showtime, otherwise the film's original audio."""
+    dubbed = languages.get("dubbed") or []
+    voiceover = languages.get("voiceover") or []
+    original = languages.get("original") or []
+    subtitles = languages.get("subtitles") or []
+
+    audio_codes = dubbed or voiceover or original
+    audio = language_name(audio_codes[0]) if audio_codes else None
+    subtitle = language_name(subtitles[0]) if subtitles else None
+    return audio, subtitle
 
 
 def matching_movie(movie_name: str, movies: list[dict]) -> dict | None:
@@ -199,12 +252,27 @@ def matching_movie(movie_name: str, movies: list[dict]) -> dict | None:
     return None
 
 
+def is_movie_due(movie: dict, now: datetime) -> bool:
+    """check_interval_seconds of None means checking is turned off for this
+    movie. A missing key (config predating this field) defaults to on."""
+    interval = movie.get("check_interval_seconds", storage.DEFAULT_CHECK_INTERVAL_SECONDS)
+    if interval is None:
+        return False
+    last_checked_at = movie.get("last_checked_at")
+    if not last_checked_at:
+        return True
+    try:
+        last_checked = datetime.fromisoformat(last_checked_at)
+    except ValueError:
+        return True
+    return (now - last_checked).total_seconds() >= interval
+
+
 def check_date(
     day: str,
     state: dict,
     seen_auditoriums: set,
     movies: list[dict],
-    require_imax: bool,
     results: list[dict],
     new_matches: list[dict],
 ) -> None:
@@ -224,7 +292,10 @@ def check_date(
         movie = matching_movie(ev["movie_name"], movies)
         if not movie:
             continue
-        if require_imax and not ev["is_imax"]:
+        # No formats selected means nothing matches (not "any format") -
+        # a movie only starts producing results once the user explicitly
+        # picks at least one format to check for.
+        if ev["format"] not in (movie.get("required_formats") or []):
             continue
 
         eid = str(ev["event_id"])
@@ -242,7 +313,10 @@ def check_date(
             "availability": ev["availability"],
             "sold_out": ev["sold_out"],
             "is_imax": ev["is_imax"],
+            "format": ev["format"],
             "booking_link": link,
+            "audio_language": ev["audio_language"],
+            "subtitle_language": ev["subtitle_language"],
         }
         results.append(entry)
 
@@ -265,25 +339,48 @@ def summarize_new_matches(new_matches: list[dict]) -> tuple[str, str]:
 
 
 CHECKING = threading.Event()
+# Movie ids queued by webui.py's "Check now" button to force a check this
+# cycle even if their own check_interval_seconds says they're not due yet.
+FORCE_CHECK_LOCK = threading.Lock()
+FORCE_CHECK_IDS: set[str] = set()
 
 
 def run_once(state: dict) -> None:
     CHECKING.set()
     try:
         config = storage.load_config()
+        now = datetime.now()
+        with FORCE_CHECK_LOCK:
+            forced_ids = set(FORCE_CHECK_IDS)
+            FORCE_CHECK_IDS.clear()
+        due_movies = [m for m in config["movies"] if m["id"] in forced_ids or is_movie_due(m, now)]
+        if not due_movies:
+            log.debug("No movies due for a check this cycle (per-movie check_interval_seconds)")
+            return
+
         today = date.today()
         seen_auditoriums = set()
         results: list[dict] = []
         new_matches: list[dict] = []
         for offset in range(DATE_RANGE_DAYS):
             day = (today + timedelta(days=offset)).isoformat()
-            check_date(
-                day, state, seen_auditoriums, config["movies"], config["require_imax"], results, new_matches
-            )
+            check_date(day, state, seen_auditoriums, due_movies, results, new_matches)
         if seen_auditoriums:
             log.debug("Auditoriums seen this cycle: %s", sorted(seen_auditoriums))
-        results.sort(key=lambda r: r["start_time"] or "")
-        storage.save_results(results)
+
+        # Movies not due this cycle keep their previously fetched showtimes
+        # instead of being wiped from results.json; movies removed from the
+        # watch list entirely (not in configured_ids) get dropped here.
+        configured_ids = {m["id"] for m in config["movies"]}
+        due_ids = {m["id"] for m in due_movies}
+        previous_matches = storage.load_results().get("matches", [])
+        preserved = [
+            r for r in previous_matches if r["movie_id"] in configured_ids and r["movie_id"] not in due_ids
+        ]
+        combined = preserved + results
+        combined.sort(key=lambda r: r["start_time"] or "")
+        storage.save_results(combined)
+        storage.mark_movies_checked(due_ids, now.isoformat(timespec="seconds"))
 
         if new_matches:
             title, message = summarize_new_matches(new_matches)
@@ -307,6 +404,11 @@ def start_control_server(wake_event: threading.Event) -> None:
 
     @control_app.route("/check-now", methods=["POST"])
     def check_now():
+        body = request.get_json(silent=True) or {}
+        movie_id = body.get("movie_id")
+        if movie_id:
+            with FORCE_CHECK_LOCK:
+                FORCE_CHECK_IDS.add(movie_id)
         wake_event.set()
         return {"ok": True}
 
@@ -321,8 +423,8 @@ def main() -> None:
     config = storage.load_config()
     titles = [m["title"] for m in config["movies"]]
     log.info(
-        "Starting cinemacity-scraper: cinema=%s movies=%r imax_only=%s interval=%ss",
-        CINEMA_ID, titles, config["require_imax"], POLL_INTERVAL_SECONDS,
+        "Starting cinemacity-scraper: cinema=%s movies=%r interval=%ss",
+        CINEMA_ID, titles, POLL_INTERVAL_SECONDS,
     )
     state = load_state()
     notify(

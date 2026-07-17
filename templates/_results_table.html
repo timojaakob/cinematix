@@ -4,6 +4,8 @@
     <tr>
       <th data-sort-key="start_time">When</th>
       <th data-sort-key="auditorium">Auditorium</th>
+      <th>Format</th>
+      <th>Language</th>
       <th data-sort-key="availability">Availability</th>
       <th></th>
     </tr>
@@ -15,9 +17,17 @@
       data-auditorium="{{ m.auditorium or '' }}"
       data-availability="{{ '%.4f' | format(m.availability) if m.availability is not none else '' }}"
       data-sold-out="{{ 'true' if m.sold_out else 'false' }}"
+      data-audio-language="{{ m.audio_language or 'Unknown' }}"
+      data-format="{{ m.format or 'Unknown' }}"
     >
       <td>{{ m.start_time | humandate(true, false) }}</td>
       <td>{{ m.auditorium }}</td>
+      <td>{{ m.format or '—' }}</td>
+      <td>
+        {% if m.audio_language %}<div>{{ m.audio_language }}</div>{% endif %}
+        {% if m.subtitle_language %}<div class="subtitle-lang">{{ m.subtitle_language }} subtitles</div>{% endif %}
+        {% if not m.audio_language and not m.subtitle_language %}—{% endif %}
+      </td>
       <td>
         {% if m.sold_out %}
           <span class="sold-out">sold out</span>

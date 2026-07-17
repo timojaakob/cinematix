@@ -27,7 +27,6 @@
     margin-bottom: 1.5rem;
   }
   h2 { font-size: 1rem; margin-top: 0; color: #ccc; }
-  label.checkbox { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; font-size: 0.9rem; }
   button {
     background: #3b6ea5;
     color: white;
@@ -73,7 +72,7 @@
     cursor: pointer;
     align-items: center;
   }
-  .search-row:hover { background: #262626; }
+  .search-row:hover, .search-row.active { background: #262626; }
   .search-row img { width: 32px; height: 48px; object-fit: cover; border-radius: 3px; background: #333; }
   .search-row .thumb-placeholder { width: 32px; height: 48px; border-radius: 3px; background: #333; flex-shrink: 0; }
   .search-row .meta { font-size: 0.85rem; line-height: 1.3; }
@@ -138,6 +137,35 @@
   }
   .remove-btn:hover { background: #b53c3c; }
   .empty { color: #777; font-style: italic; padding: 0.5rem 0; }
+
+  /* add-movie dialog */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    align-items: center; justify-content: center; z-index: 100; padding: 1rem;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+    padding: 1.1rem 1.4rem 1.4rem; width: 100%; max-width: 420px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; gap: 0.75rem; }
+  .modal-header h2 { margin: 0; font-size: 1rem; color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .modal-close {
+    background: transparent; border: none; color: #999; font-size: 1.2rem; line-height: 1;
+    padding: 0.2rem 0.5rem; border-radius: 5px; cursor: pointer; flex-shrink: 0;
+  }
+  .modal-close:hover { color: #eee; background: #262626; }
+  .modal-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+  .setting-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .setting-row label { font-size: 0.8rem; color: #999; }
+  .format-checkboxes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .setting-hint { margin: 0.6rem 0 0; font-size: 0.75rem; color: #777; }
+  label.day-toggle {
+    display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: #ccc;
+    cursor: pointer; border: 1px solid #333; border-radius: 5px; padding: 0.2rem 0.5rem;
+  }
+  label.day-toggle:has(input:checked) { border-color: #3b6ea5; color: #eee; }
 </style>
 </head>
 <body>
@@ -153,11 +181,28 @@
       <input type="text" id="movie-search" placeholder="Search for a movie…" autocomplete="off">
       <div id="search-dropdown"></div>
     </div>
-    <label class="checkbox" style="margin-top: 0.9rem;">
-      <input type="checkbox" id="require-imax" {% if require_imax %}checked{% endif %}>
-      IMAX only
-    </label>
   </section>
+
+  <div id="add-movie-overlay" class="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-movie-title">
+      <div class="modal-header">
+        <h2 id="add-movie-title">Add movie</h2>
+        <button id="add-movie-close-btn" type="button" class="modal-close" aria-label="Cancel">✕</button>
+      </div>
+      <div class="setting-row">
+        <label>Formats to check</label>
+        <div id="add-movie-formats" class="format-checkboxes">
+          {% for fmt in all_formats %}
+          <label class="day-toggle"><input type="checkbox" class="add-movie-format" value="{{ fmt }}"> {{ fmt }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <p class="setting-hint">No formats selected means no showtimes will match.</p>
+      <div class="modal-actions">
+        <button id="add-movie-confirm-btn" type="button">Add movie</button>
+      </div>
+    </div>
+  </div>
 
   <section>
     <h2>Watched movies</h2>
@@ -194,16 +239,59 @@
 <script>
 const searchInput = document.getElementById('movie-search');
 const dropdown = document.getElementById('search-dropdown');
-const imaxToggle = document.getElementById('require-imax');
 let debounceTimer = null;
+let currentResults = [];
+let activeIndex = -1;
 
-imaxToggle.addEventListener('change', () => {
-  const form = new FormData();
-  form.set('require_imax', imaxToggle.checked ? 'on' : 'off');
-  fetch('{{ url_for("update_config") }}', { method: 'POST', body: form });
+// --- Add-movie dialog: opened when a search result is picked, lets the
+// user choose which formats to check for before the movie is actually
+// added (empty selection = no formats wanted, so it won't match anything
+// until the user picks at least one). ---
+const addMovieOverlay = document.getElementById('add-movie-overlay');
+const addMovieTitle = document.getElementById('add-movie-title');
+const addMovieCloseBtn = document.getElementById('add-movie-close-btn');
+const addMovieConfirmBtn = document.getElementById('add-movie-confirm-btn');
+const addMovieFormatCheckboxes = Array.from(document.querySelectorAll('.add-movie-format'));
+let pendingMovie = null;
+
+function openAddDialog(result) {
+  pendingMovie = result;
+  addMovieTitle.textContent = result.year ? `${result.title} (${result.year})` : result.title;
+  for (const cb of addMovieFormatCheckboxes) cb.checked = false;
+  dropdown.classList.remove('open');
+  addMovieOverlay.classList.add('open');
+}
+
+function closeAddDialog() {
+  pendingMovie = null;
+  addMovieOverlay.classList.remove('open');
+}
+
+addMovieCloseBtn.addEventListener('click', closeAddDialog);
+addMovieOverlay.addEventListener('click', (e) => {
+  if (e.target === addMovieOverlay) closeAddDialog();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && addMovieOverlay.classList.contains('open')) closeAddDialog();
+});
+addMovieConfirmBtn.addEventListener('click', () => {
+  if (!pendingMovie) return;
+  const formats = addMovieFormatCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
+  addMovie(pendingMovie.tmdb_id, formats);
 });
 
+function updateActive() {
+  const rows = dropdown.querySelectorAll('.search-row');
+  rows.forEach((row, i) => {
+    const isActive = i === activeIndex;
+    row.classList.toggle('active', isActive);
+    if (isActive) row.scrollIntoView({ block: 'nearest' });
+  });
+}
+
 function renderResults(results) {
+  currentResults = results;
+  activeIndex = -1;
   dropdown.innerHTML = '';
   if (results.length === 0) {
     dropdown.innerHTML = '<div class="search-empty">No results</div>';
@@ -215,18 +303,18 @@ function renderResults(results) {
         ? `<img src="${r.poster_thumb}" alt="">`
         : `<div class="thumb-placeholder"></div>`;
       row.innerHTML = `${thumb}<div class="meta"><div class="title">${r.title}</div><div class="year">${r.year || ''}</div></div>`;
-      row.addEventListener('click', () => addMovie(r.tmdb_id));
+      row.addEventListener('click', () => openAddDialog(r));
       dropdown.appendChild(row);
     }
   }
   dropdown.classList.add('open');
 }
 
-async function addMovie(tmdbId) {
+async function addMovie(tmdbId, requiredFormats) {
   const resp = await fetch('{{ url_for("add_movie") }}', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tmdb_id: tmdbId }),
+    body: JSON.stringify({ tmdb_id: tmdbId, required_formats: requiredFormats }),
   });
   if (resp.ok) {
     window.location.reload();
@@ -247,6 +335,27 @@ searchInput.addEventListener('input', () => {
     const results = await resp.json();
     renderResults(results);
   }, 300);
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (!dropdown.classList.contains('open') || currentResults.length === 0) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    activeIndex = Math.min(activeIndex + 1, currentResults.length - 1);
+    updateActive();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    activeIndex = Math.max(activeIndex - 1, -1);
+    updateActive();
+  } else if (e.key === 'Enter') {
+    if (activeIndex >= 0) {
+      e.preventDefault();
+      openAddDialog(currentResults[activeIndex]);
+    }
+  } else if (e.key === 'Escape') {
+    dropdown.classList.remove('open');
+  }
 });
 
 document.addEventListener('click', (e) => {

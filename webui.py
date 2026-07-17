@@ -21,7 +21,29 @@ TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMG_BASE = "https://image.tmdb.org/t/p"
 SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://cinemacity-scraper:5001")
 
+# (seconds, label) options for the per-movie check-frequency dropdown.
+CHECK_INTERVAL_OPTIONS = [
+    (120, "Every 2 minutes"),
+    (300, "Every 5 minutes"),
+    (600, "Every 10 minutes"),
+    (900, "Every 15 minutes"),
+    (1800, "Every 30 minutes"),
+    (3600, "Every hour"),
+    (7200, "Every 2 hours"),
+    (14400, "Every 4 hours"),
+    (21600, "Every 6 hours"),
+    (43200, "Every 12 hours"),
+    (86400, "Every day"),
+]
+
 app = Flask(__name__)
+
+
+def sanitize_required_formats(values: list[str]) -> list[str]:
+    """Keeps only known formats and their storage.FORMAT_OPTIONS order,
+    regardless of what the client sent - defends against a stale page
+    submitting a format storage.FORMAT_OPTIONS no longer contains."""
+    return [f for f in storage.FORMAT_OPTIONS if f in values]
 
 
 def _ordinal(n: int) -> str:
@@ -117,6 +139,7 @@ def tmdb_details(tmdb_id: int) -> dict | None:
         "runtime": d.get("runtime"),
         "poster_url": f"{TMDB_IMG_BASE}/w342{d['poster_path']}" if d.get("poster_path") else None,
         "release_date": d.get("release_date") or "",
+        "imdb_id": d.get("imdb_id") or None,
     }
 
 
@@ -126,16 +149,8 @@ def index():
     return render_template(
         "index.html",
         movies=config["movies"],
-        require_imax=config["require_imax"],
+        all_formats=storage.FORMAT_OPTIONS,
     )
-
-
-@app.route("/config", methods=["POST"])
-def update_config():
-    config = storage.load_config()
-    config["require_imax"] = request.form.get("require_imax") == "on"
-    storage.save_config(config)
-    return redirect(url_for("index"))
 
 
 @app.route("/api/search", methods=["GET"])
@@ -157,6 +172,7 @@ def add_movie():
     movie = {
         "id": f"tmdb-{tmdb_id}",
         "tmdb_id": tmdb_id,
+        "imdb_id": details["imdb_id"],
         "title": details["title"],
         "query": details["title"].lower(),
         "poster_url": details["poster_url"],
@@ -164,6 +180,9 @@ def add_movie():
         "runtime": details["runtime"],
         "release_date": details["release_date"],
         "added_at": datetime.now().isoformat(timespec="seconds"),
+        "check_interval_seconds": storage.DEFAULT_CHECK_INTERVAL_SECONDS,
+        "last_checked_at": None,
+        "required_formats": sanitize_required_formats(body.get("required_formats") or []),
     }
     config = storage.load_config()
     storage.add_movie(config, movie)
@@ -186,27 +205,50 @@ def movie_detail(movie_id):
 
     results = storage.load_results()
     matches = [m for m in results["matches"] if m["movie_id"] == movie_id]
+    audio_languages = sorted({m.get("audio_language") or "Unknown" for m in matches})
+    format_options = sorted({m.get("format") or "Unknown" for m in matches})
     return render_template(
         "movie.html",
         movie=movie,
         matches=matches,
-        updated_at=results["updated_at"],
+        audio_languages=audio_languages,
+        format_options=format_options,
+        all_formats=storage.FORMAT_OPTIONS,
+        # Per-movie, not the global results.json timestamp: movies can now
+        # have different check_interval_seconds, so the last poll cycle
+        # doesn't necessarily mean *this* movie was just refreshed.
+        updated_at=movie.get("last_checked_at"),
+        check_interval_options=CHECK_INTERVAL_OPTIONS,
     )
 
 
-@app.route("/movies/<movie_id>/query", methods=["POST"])
-def update_query(movie_id):
+@app.route("/movies/<movie_id>/settings", methods=["POST"])
+def update_settings(movie_id):
     config = storage.load_config()
     if not any(m["id"] == movie_id for m in config["movies"]):
         abort(404)
-    storage.update_movie_query(config, movie_id, request.form.get("query", ""))
+
+    interval_raw = request.form.get("check_interval", "")
+    if interval_raw == "off":
+        check_interval_seconds = None
+    else:
+        try:
+            check_interval_seconds = int(interval_raw)
+        except ValueError:
+            check_interval_seconds = storage.DEFAULT_CHECK_INTERVAL_SECONDS
+
+    required_formats = sanitize_required_formats(request.form.getlist("required_formats"))
+    storage.update_movie_settings(
+        config, movie_id, request.form.get("query", ""), check_interval_seconds, required_formats
+    )
     return redirect(url_for("movie_detail", movie_id=movie_id))
 
 
 @app.route("/check-now", methods=["POST"])
 def check_now():
+    body = request.get_json(silent=True) or {}
     try:
-        requests.post(f"{SCRAPER_CONTROL_URL}/check-now", timeout=5)
+        requests.post(f"{SCRAPER_CONTROL_URL}/check-now", json={"movie_id": body.get("movie_id")}, timeout=5)
     except requests.RequestException as e:
         return jsonify({"ok": False, "error": str(e)}), 502
     return jsonify({"ok": True})
@@ -220,7 +262,15 @@ def api_status():
         checking = resp.json().get("checking", False)
     except requests.RequestException:
         pass
-    return jsonify({"updated_at": storage.load_results()["updated_at"], "checking": checking})
+
+    movie_id = request.args.get("movie_id")
+    if movie_id:
+        config = storage.load_config()
+        movie = next((m for m in config["movies"] if m["id"] == movie_id), None)
+        updated_at = movie.get("last_checked_at") if movie else None
+    else:
+        updated_at = storage.load_results()["updated_at"]
+    return jsonify({"updated_at": updated_at, "checking": checking})
 
 
 if __name__ == "__main__":
