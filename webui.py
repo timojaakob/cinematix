@@ -24,6 +24,53 @@ SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://cinemacity-s
 app = Flask(__name__)
 
 
+def _ordinal(n: int) -> str:
+    if 11 <= n % 100 <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+@app.template_filter("humandate")
+def humandate(value: str | None, with_time: bool = False, with_year: bool = True) -> str:
+    if not value:
+        return ""
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    formatted = dt.strftime(f"%B {_ordinal(dt.day)}")
+    if with_year:
+        formatted += dt.strftime(" %Y")
+    if with_time:
+        formatted += dt.strftime(" %H:%M")
+    return formatted
+
+
+@app.template_filter("relativedate")
+def relativedate(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    seconds = max((datetime.now() - dt).total_seconds(), 0)
+    if seconds < 30:
+        return "just now"
+    minutes = int((seconds + 30) // 60)
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = int((seconds + 1800) // 3600)
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = int((seconds + 43200) // 86400)
+    if days < 7:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    return humandate(value, with_time=True)
+
+
 def tmdb_search(query: str) -> list[dict]:
     if not query.strip():
         return []

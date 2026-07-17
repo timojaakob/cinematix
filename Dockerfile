@@ -6,5 +6,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY scraper.py webui.py storage.py .
 COPY templates/ templates/
+COPY static/ static/
 
 CMD ["python", "-u", "scraper.py"]

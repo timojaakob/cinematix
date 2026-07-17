@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 <title>cinemacity-scraper</title>
 <style>
   :root { color-scheme: dark light; }
@@ -14,6 +15,8 @@
     background: #111;
     color: #eee;
   }
+  .brand { display: flex; align-items: center; gap: 0.6rem; }
+  .brand img.logo { width: 36px; height: 36px; border-radius: 6px; }
   h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
   .subtitle { color: #999; font-size: 0.85rem; margin-bottom: 1.5rem; }
   section {
@@ -138,7 +141,10 @@
 </style>
 </head>
 <body>
-  <h1>cinemacity-scraper</h1>
+  <div class="brand">
+    <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
+    <h1>cinemacity-scraper</h1>
+  </div>
   <p class="subtitle">Praha Flora</p>
 
   <section>

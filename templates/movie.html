@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="60">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 <title>{{ movie.title }} — cinemacity-scraper</title>
 <style>
   :root { color-scheme: dark light; }
@@ -36,7 +36,7 @@
   .header h1 { font-size: 1.3rem; margin: 0 0 0.3rem; }
   .header .meta { color: #999; font-size: 0.85rem; margin-bottom: 0.6rem; }
   .header .overview { font-size: 0.88rem; line-height: 1.5; color: #ccc; }
-  .query-form { display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem; }
+  .query-form { display: flex; gap: 0.5rem; align-items: center; }
   .query-form input[type="text"] {
     background: #0d0d0d; color: #eee; border: 1px solid #333; border-radius: 6px;
     padding: 0.4rem 0.6rem; font-size: 0.85rem; width: 200px;
@@ -47,9 +47,60 @@
     padding: 0.4rem 1rem; font-size: 0.85rem; cursor: pointer;
   }
   button:hover { background: #4a80bb; }
+  button:disabled, button:disabled:hover { background: #555; cursor: default; }
+  .filters-row { display: flex; margin-bottom: 0.75rem; }
+  .icon-btn {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    background: transparent; color: #ccc; border: 1px solid #333; border-radius: 6px;
+    padding: 0.35rem 0.75rem; font-size: 0.82rem; cursor: pointer;
+  }
+  .icon-btn svg { width: 14px; height: 14px; }
+  .icon-btn:hover { border-color: #3b6ea5; color: #eee; }
+  .icon-btn[aria-expanded="true"] { background: #3b6ea5; border-color: #3b6ea5; color: white; }
+  .filters-panel {
+    display: none; flex-direction: column; gap: 0.75rem;
+    background: #151515; border: 1px solid #2a2a2a; border-radius: 6px;
+    padding: 0.85rem 1rem; margin-bottom: 0.9rem;
+  }
+  .filters-panel.open { display: flex; }
+  .filter-group { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+  .filter-label { font-size: 0.78rem; color: #999; margin-right: 0.25rem; }
+  .filter-sep { color: #666; }
+  .time-combo { position: relative; display: inline-flex; align-items: stretch; }
+  .time-combo input.time-input {
+    background: #0d0d0d; color: #eee; border: 1px solid #333; border-right: none;
+    border-radius: 5px 0 0 5px; padding: 0.25rem 0.4rem; font-size: 0.82rem; width: 4.5rem;
+  }
+  .time-combo-toggle {
+    background: #0d0d0d; color: #999; border: 1px solid #333; border-radius: 0 5px 5px 0;
+    padding: 0.25rem 0.4rem; font-size: 0.7rem; cursor: pointer; line-height: 1;
+  }
+  .time-combo-toggle:hover { background: #0d0d0d; color: #eee; border-color: #3b6ea5; }
+  .time-combo-list {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+    background: #1a1a1a; border: 1px solid #333; border-radius: 6px; min-width: 100%;
+    max-height: 220px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .time-combo-list.open { display: block; }
+  .time-combo-option { padding: 0.35rem 0.6rem; font-size: 0.82rem; color: #ccc; cursor: pointer; white-space: nowrap; }
+  .time-combo-option:hover { background: #262626; color: #eee; }
+  .reset-btn {
+    background: transparent; border: none; color: #6aa8e0; font-size: 0.78rem;
+    padding: 0; cursor: pointer; text-decoration: underline;
+  }
+  .reset-btn:hover { background: transparent; color: #8fc0f0; }
+  label.checkbox { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #ccc; cursor: pointer; }
+  label.day-toggle {
+    display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: #ccc;
+    cursor: pointer; border: 1px solid #333; border-radius: 5px; padding: 0.2rem 0.5rem;
+  }
+  label.day-toggle:has(input:checked) { border-color: #3b6ea5; color: #eee; }
   table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
   th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #2a2a2a; }
   th { color: #999; font-weight: 500; }
+  th[data-sort-key] { cursor: pointer; user-select: none; white-space: nowrap; }
+  th[data-sort-key]:hover { color: #ccc; }
+  th[data-sort-key] .sort-arrow { color: #6aa8e0; margin-left: 0.25rem; }
   .sold-out { color: #e06a6a; }
   .avail { color: #7fbf7f; }
   a.book {
@@ -76,27 +127,75 @@
         <h1>{{ movie.title }}</h1>
         <div class="meta">
           {% if movie.runtime %}{{ movie.runtime }} min{% endif %}
-          {% if movie.release_date %} · {{ movie.release_date }}{% endif %}
+          {% if movie.release_date %} · {{ movie.release_date | humandate }}{% endif %}
         </div>
         {% if movie.overview %}<div class="overview">{{ movie.overview }}</div>{% endif %}
-
-        <form class="query-form" method="post" action="{{ url_for('update_query', movie_id=movie.id) }}">
-          <label for="query">Match text</label>
-          <input type="text" id="query" name="query" value="{{ movie.query }}">
-          <button type="submit">Save</button>
-        </form>
       </div>
     </div>
   </section>
 
   <section>
+    <h2>Settings</h2>
+    <form class="query-form" method="post" action="{{ url_for('update_query', movie_id=movie.id) }}">
+      <label for="query">Match text</label>
+      <input type="text" id="query" name="query" value="{{ movie.query }}">
+      <button type="submit">Save</button>
+    </form>
+  </section>
+
+  <section>
     <div class="section-head">
-      <h2>Showtimes {% if updated_at %}<span class="subtitle" style="margin:0;">— last checked {{ updated_at }}</span>{% endif %}</h2>
+      <h2>Showtimes {% if updated_at %}<span class="subtitle" style="margin:0;">— last checked <span id="last-checked">{{ updated_at | relativedate }}</span></span>{% endif %}</h2>
       <div>
         <button id="check-now-btn" type="button">Check now</button>
         <span id="check-now-status"></span>
       </div>
     </div>
+    {% if matches %}
+    <div class="filters-row">
+      <button id="filters-toggle" type="button" class="icon-btn" aria-expanded="false" aria-controls="filters-panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="4 4 20 4 14 12.5 14 20 10 18 10 12.5 4 4"/>
+        </svg>
+        Filters
+      </button>
+    </div>
+    <div id="filters-panel" class="filters-panel">
+      <label class="checkbox"><input type="checkbox" id="filter-low-avail" checked> Hide low availability</label>
+
+      <div class="filter-group">
+        <span class="filter-label">Time range</span>
+        <div class="time-combo">
+          <input type="text" class="time-input" id="filter-time-from" value="00:00"
+                 placeholder="HH:MM" inputmode="numeric" maxlength="5" autocomplete="off">
+          <button type="button" class="time-combo-toggle" data-for="filter-time-from" aria-label="Choose start time">▾</button>
+          <div class="time-combo-list" data-for="filter-time-from"></div>
+        </div>
+        <span class="filter-sep">–</span>
+        <div class="time-combo">
+          <input type="text" class="time-input" id="filter-time-to" value="23:59"
+                 placeholder="HH:MM" inputmode="numeric" maxlength="5" autocomplete="off">
+          <button type="button" class="time-combo-toggle" data-for="filter-time-to" aria-label="Choose end time">▾</button>
+          <div class="time-combo-list" data-for="filter-time-to"></div>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <span class="filter-label">Weekdays</span>
+        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="1" checked> Mon</label>
+        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="2" checked> Tue</label>
+        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="3" checked> Wed</label>
+        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="4" checked> Thu</label>
+        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="5" checked> Fri</label>
+        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="6" checked> Sat</label>
+        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="0" checked> Sun</label>
+      </div>
+
+      <div class="filter-group">
+        <button type="button" id="filters-reset" class="reset-btn">Reset filters</button>
+      </div>
+    </div>
+    {% endif %}
     {% include "_results_table.html" %}
   </section>
 
@@ -104,10 +203,43 @@
 const lastUpdatedAt = {{ updated_at | tojson }};
 const btn = document.getElementById('check-now-btn');
 const status = document.getElementById('check-now-status');
+const btnDefaultText = btn.textContent;
+const lastCheckedEl = document.getElementById('last-checked');
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+function ordinal(n) {
+  if (n >= 11 && n <= 13) return n + 'th';
+  return n + ({1: 'st', 2: 'nd', 3: 'rd'}[n % 10] || 'th');
+}
+
+function formatRelative(isoStr) {
+  const dt = new Date(isoStr);
+  const seconds = Math.max((Date.now() - dt.getTime()) / 1000, 0);
+  if (seconds < 30) return 'just now';
+  const minutes = Math.floor((seconds + 30) / 60);
+  if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+  const hours = Math.floor((seconds + 1800) / 3600);
+  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+  const days = Math.floor((seconds + 43200) / 86400);
+  if (days < 7) return `${days} day${days !== 1 ? 's' : ''} ago`;
+  const hh = String(dt.getHours()).padStart(2, '0');
+  const mm = String(dt.getMinutes()).padStart(2, '0');
+  return `${MONTHS[dt.getMonth()]} ${ordinal(dt.getDate())} ${dt.getFullYear()} ${hh}:${mm}`;
+}
+
+if (lastCheckedEl && lastUpdatedAt) {
+  setInterval(() => { lastCheckedEl.textContent = formatRelative(lastUpdatedAt); }, 30000);
+}
+
+function setChecking(isChecking) {
+  btn.disabled = isChecking;
+  btn.textContent = isChecking ? 'Checking…' : btnDefaultText;
+}
 
 async function waitForResult() {
-  btn.disabled = true;
-  status.textContent = 'Checking…';
+  setChecking(true);
   for (let i = 0; i < 40; i++) {
     await new Promise(r => setTimeout(r, 2000));
     const resp = await fetch('{{ url_for("api_status") }}');
@@ -118,18 +250,18 @@ async function waitForResult() {
     }
     if (!data.checking) break;
   }
+  setChecking(false);
   status.textContent = 'Still checking — refresh in a bit.';
-  btn.disabled = false;
 }
 
 btn.addEventListener('click', async () => {
-  btn.disabled = true;
-  status.textContent = 'Checking…';
+  setChecking(true);
+  status.textContent = '';
   try {
     await fetch('{{ url_for("check_now") }}', { method: 'POST' });
   } catch (e) {
+    setChecking(false);
     status.textContent = 'Could not reach the scraper.';
-    btn.disabled = false;
     return;
   }
   waitForResult();
@@ -141,6 +273,182 @@ fetch('{{ url_for("api_status") }}')
   .then(r => r.json())
   .then(data => { if (data.checking) waitForResult(); })
   .catch(() => {});
+
+// --- Showtimes sorting & filtering (client-side; all matches are already
+// rendered, so re-sort/hide rows in place instead of round-tripping). ---
+const resultsTable = document.getElementById('results-table');
+if (resultsTable) {
+  const tbody = resultsTable.querySelector('tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  const headers = Array.from(resultsTable.querySelectorAll('th[data-sort-key]'));
+  const noMatchesEl = document.getElementById('no-matches-filtered');
+  const filterLowAvail = document.getElementById('filter-low-avail');
+  const filterTimeFrom = document.getElementById('filter-time-from');
+  const filterTimeTo = document.getElementById('filter-time-to');
+  const weekdayCheckboxes = Array.from(document.querySelectorAll('.filter-weekday'));
+  const filtersToggle = document.getElementById('filters-toggle');
+  const filtersPanel = document.getElementById('filters-panel');
+  const filtersReset = document.getElementById('filters-reset');
+
+  filtersToggle.addEventListener('click', () => {
+    const isOpen = filtersPanel.classList.toggle('open');
+    filtersToggle.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  // Custom time dropdown (half-hour steps) — native <input type="time">/
+  // <datalist> support for suggestion dropdowns is unreliable across
+  // browsers (Firefox doesn't show one at all; Chrome only honors it
+  // inconsistently), so build a small combobox ourselves instead.
+  const TIME_OPTIONS = [];
+  for (let i = 0; i < 48; i++) {
+    const h = String(Math.floor(i / 2)).padStart(2, '0');
+    const m = i % 2 === 0 ? '00' : '30';
+    TIME_OPTIONS.push(`${h}:${m}`);
+  }
+
+  function setupTimeCombo(inputId) {
+    const input = document.getElementById(inputId);
+    const toggle = document.querySelector(`.time-combo-toggle[data-for="${inputId}"]`);
+    const list = document.querySelector(`.time-combo-list[data-for="${inputId}"]`);
+    for (const t of TIME_OPTIONS) {
+      const opt = document.createElement('div');
+      opt.className = 'time-combo-option';
+      opt.textContent = t;
+      opt.addEventListener('click', () => {
+        input.value = t;
+        list.classList.remove('open');
+        render();
+      });
+      list.appendChild(opt);
+    }
+    toggle.addEventListener('click', () => {
+      for (const other of document.querySelectorAll('.time-combo-list.open')) {
+        if (other !== list) other.classList.remove('open');
+      }
+      list.classList.toggle('open');
+    });
+  }
+
+  setupTimeCombo('filter-time-from');
+  setupTimeCombo('filter-time-to');
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.time-combo')) {
+      for (const list of document.querySelectorAll('.time-combo-list.open')) list.classList.remove('open');
+    }
+  });
+
+  const LOW_AVAILABILITY_THRESHOLD = 0.3;
+  const DEFAULT_SORT_DIR = { start_time: 'asc', auditorium: 'asc', availability: 'desc' };
+  let sortKey = 'availability';
+  let sortDir = 'desc';
+
+  function rowValue(row, key) {
+    if (key === 'availability') {
+      const raw = row.dataset.availability;
+      if (row.dataset.soldOut === 'true') return -1;
+      return raw === '' ? -1 : parseFloat(raw);
+    }
+    if (key === 'start_time') return row.dataset.startTime;
+    return row.dataset.auditorium.toLowerCase();
+  }
+
+  function isLowAvailability(row) {
+    if (row.dataset.soldOut === 'true') return true;
+    const raw = row.dataset.availability;
+    return raw !== '' && parseFloat(raw) < LOW_AVAILABILITY_THRESHOLD;
+  }
+
+  const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+  function parseTimeInput(value, fallback) {
+    return TIME_RE.test(value) ? value : fallback;
+  }
+
+  function isWithinTimeRange(row) {
+    const dt = new Date(row.dataset.startTime);
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const mm = String(dt.getMinutes()).padStart(2, '0');
+    const t = `${hh}:${mm}`;
+    const from = parseTimeInput(filterTimeFrom.value, '00:00');
+    const to = parseTimeInput(filterTimeTo.value, '23:59');
+    return t >= from && t <= to;
+  }
+
+  function isSelectedWeekday(row) {
+    const day = new Date(row.dataset.startTime).getDay();
+    return weekdayCheckboxes.some(cb => cb.checked && parseInt(cb.dataset.day, 10) === day);
+  }
+
+  function updateHeaderIndicators() {
+    for (const th of headers) {
+      th.querySelector('.sort-arrow')?.remove();
+      if (th.dataset.sortKey === sortKey) {
+        const arrow = document.createElement('span');
+        arrow.className = 'sort-arrow';
+        arrow.textContent = sortDir === 'asc' ? '▲' : '▼';
+        th.appendChild(arrow);
+      }
+    }
+  }
+
+  function render() {
+    const sorted = rows.slice().sort((a, b) => {
+      const va = rowValue(a, sortKey);
+      const vb = rowValue(b, sortKey);
+      if (va < vb) return sortDir === 'asc' ? -1 : 1;
+      if (va > vb) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    for (const row of sorted) tbody.appendChild(row);
+
+    let visibleCount = 0;
+    for (const row of rows) {
+      const hidden =
+        (filterLowAvail.checked && isLowAvailability(row)) ||
+        !isWithinTimeRange(row) ||
+        !isSelectedWeekday(row);
+      row.style.display = hidden ? 'none' : '';
+      if (!hidden) visibleCount++;
+    }
+    resultsTable.style.display = visibleCount === 0 ? 'none' : '';
+    if (noMatchesEl) noMatchesEl.style.display = visibleCount === 0 ? '' : 'none';
+
+    updateHeaderIndicators();
+  }
+
+  for (const th of headers) {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sortKey;
+      if (key === sortKey) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortKey = key;
+        sortDir = DEFAULT_SORT_DIR[key] || 'asc';
+      }
+      render();
+    });
+  }
+
+  for (const cb of [filterLowAvail, ...weekdayCheckboxes]) {
+    cb.addEventListener('change', render);
+  }
+  for (const input of [filterTimeFrom, filterTimeTo]) {
+    input.addEventListener('input', render);
+  }
+
+  filtersReset.addEventListener('click', () => {
+    filterLowAvail.checked = true;
+    filterTimeFrom.value = '00:00';
+    filterTimeTo.value = '23:59';
+    for (const cb of weekdayCheckboxes) cb.checked = true;
+    sortKey = 'availability';
+    sortDir = 'desc';
+    render();
+  });
+
+  render();
+}
 </script>
 </body>
 </html>

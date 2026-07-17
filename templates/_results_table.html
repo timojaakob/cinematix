@@ -1,17 +1,22 @@
 {% if matches %}
-<table>
+<table id="results-table">
   <thead>
     <tr>
-      <th>When</th>
-      <th>Auditorium</th>
-      <th>Availability</th>
+      <th data-sort-key="start_time">When</th>
+      <th data-sort-key="auditorium">Auditorium</th>
+      <th data-sort-key="availability">Availability</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for m in matches %}
-    <tr>
-      <td>{{ (m.start_time or '').replace('T', ' ') }}</td>
+    <tr
+      data-start-time="{{ m.start_time or '' }}"
+      data-auditorium="{{ m.auditorium or '' }}"
+      data-availability="{{ '%.4f' | format(m.availability) if m.availability is not none else '' }}"
+      data-sold-out="{{ 'true' if m.sold_out else 'false' }}"
+    >
+      <td>{{ m.start_time | humandate(true, false) }}</td>
       <td>{{ m.auditorium }}</td>
       <td>
         {% if m.sold_out %}
@@ -31,6 +36,7 @@
     {% endfor %}
   </tbody>
 </table>
+<p id="no-matches-filtered" class="empty" style="display:none;">No showtimes match the current filters.</p>
 {% else %}
   <p class="empty">No matching showtimes found yet.</p>
 {% endif %}
