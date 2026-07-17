@@ -22,8 +22,8 @@ Two processes share one image and one `/data` volume:
 
 ## How it works
 
-Cinema City has no official public API. The endpoint used here was
-reverse-engineered from the site's own frontend requests:
+Cinema City has no official public API. The endpoint used here builds on
+the reverse-engineering work in [ra100/cinema-loader](https://github.com/ra100/cinema-loader):
 
 ```
 GET https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/{siteId}/film-events/in-cinema/{cinemaId}/at-date/{YYYY-MM-DD}?attr=&lang=cs_CZ
@@ -127,3 +127,9 @@ services:
 - Title matching is a plain substring match against the Czech listing
   title, which may differ from the film's English/TMDb title.
 - The web UI has no authentication — only run it on a trusted LAN.
+
+## Credits
+
+The Cinema City data-api-service endpoint this project polls was
+reverse-engineered by [ra100/cinema-loader](https://github.com/ra100/cinema-loader) —
+this project wouldn't exist without that work.
