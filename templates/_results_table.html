@@ -1,0 +1,36 @@
+{% if matches %}
+<table>
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Auditorium</th>
+      <th>Availability</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in matches %}
+    <tr>
+      <td>{{ (m.start_time or '').replace('T', ' ') }}</td>
+      <td>{{ m.auditorium }}</td>
+      <td>
+        {% if m.sold_out %}
+          <span class="sold-out">sold out</span>
+        {% elif m.availability is not none %}
+          <span class="avail">{{ '%.0f' | format(m.availability * 100) }}% free</span>
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td>
+        {% if not m.sold_out %}
+          <a class="book" href="{{ m.booking_link }}" target="_blank" rel="noopener">Book</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p class="empty">No matching showtimes found yet.</p>
+{% endif %}

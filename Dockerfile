@@ -4,6 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY scraper.py .
+COPY scraper.py webui.py storage.py .
+COPY templates/ templates/
 
 CMD ["python", "-u", "scraper.py"]

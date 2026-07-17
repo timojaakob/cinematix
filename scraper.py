@@ -3,10 +3,16 @@
 Cinema City (cinemacity.cz) showtime/availability scraper.
 
 Polls the site's internal data-api-service JSON feed for a given cinema,
-looks for showtimes matching a movie title query, and pushes an ntfy
-notification when a matching, non-sold-out showing appears (IMAX-only
+looks for showtimes matching one or more movie title queries, and pushes an
+ntfy notification when a matching, non-sold-out showing appears (IMAX-only
 by default). State (which events we've already notified about) is kept
 in a small JSON file so we don't spam on every poll.
+
+The watched movie list and IMAX requirement live in /data/config.json,
+editable at runtime via the companion webui.py without restarting this
+process (config is reloaded once per poll cycle). Every poll cycle also
+writes the full set of currently matching showtimes to /data/results.json
+so the web UI can display them.
 
 Schema and IMAX detection fully confirmed against live data on 2026-07-17:
 body.events[]/body.films[], soldOut, availabilityRatio, attributeIds,
@@ -27,13 +33,13 @@ from pathlib import Path
 
 import requests
 
+import storage
+
 # --- Config (env vars) -------------------------------------------------
 
 CINEMA_ID = os.environ.get("CINEMA_ID", "1052")  # Praha Flora
 SITE_ID = os.environ.get("SITE_ID", "10101")  # CZ site code used in the API path
 LANG = os.environ.get("LANG_CODE", "cs_CZ")
-MOVIE_QUERY = os.environ.get("MOVIE_QUERY", "dune").lower()
-REQUIRE_IMAX = os.environ.get("REQUIRE_IMAX", "true").lower() == "true"
 # Confirmed live on 2026-07-17 against a real IMAX screening (Odyssea,
 # 2026-07-17T20:30 at Flora): the IMAX auditorium reports
 # auditoriumTinyName="IMAX" (auditorium="IMAX VOLVO") AND carries the
@@ -48,6 +54,7 @@ DATE_RANGE_DAYS = int(os.environ.get("DATE_RANGE_DAYS", "21"))
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "120"))
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "media-server-timo-8k3p")
 NTFY_URL = os.environ.get("NTFY_URL", f"https://ntfy.sh/{NTFY_TOPIC}")
+WEBUI_URL = os.environ.get("WEBUI_URL", "http://10.0.0.32:8090")
 STATE_FILE = Path(os.environ.get("STATE_FILE", "/data/state.json"))
 DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 
@@ -81,13 +88,12 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state))
+    storage._atomic_write(STATE_FILE, json.dumps(state))
 
 
 # --- ntfy ------------------------------------------------------------
 
-def notify(title: str, message: str, url: str = None, priority: str = "urgent") -> None:
+def notify(title: str, message: str, url: str = None, priority: str = "urgent") -> bool:
     headers = {"Title": title, "Priority": priority, "Tags": "movie_camera,tickets"}
     if url:
         headers["Click"] = url
@@ -95,8 +101,10 @@ def notify(title: str, message: str, url: str = None, priority: str = "urgent") 
         resp = requests.post(NTFY_URL, data=message.encode("utf-8"), headers=headers, timeout=10)
         resp.raise_for_status()
         log.info("Notified: %s", title)
+        return True
     except requests.RequestException as e:
         log.error("ntfy push failed: %s", e)
+        return False
 
 
 def clean_booking_link(link: str | None) -> str | None:
@@ -175,7 +183,23 @@ def extract_events(payload: dict) -> list[dict]:
     return normalized
 
 
-def check_date(day: str, state: dict, seen_auditoriums: set) -> None:
+def matching_movie(movie_name: str, movies: list[dict]) -> dict | None:
+    name_lower = movie_name.lower()
+    for m in movies:
+        if m["query"] and m["query"] in name_lower:
+            return m
+    return None
+
+
+def check_date(
+    day: str,
+    state: dict,
+    seen_auditoriums: set,
+    movies: list[dict],
+    require_imax: bool,
+    results: list[dict],
+    new_matches: list[dict],
+) -> None:
     payload = fetch_day(day)
     if DEBUG and payload:
         log.debug("Raw payload for %s:\n%s", day, json.dumps(payload, indent=2)[:3000])
@@ -188,48 +212,91 @@ def check_date(day: str, state: dict, seen_auditoriums: set) -> None:
         if ev["auditorium"]:
             seen_auditoriums.add(ev["auditorium"])
 
-    matches = [e for e in events if MOVIE_QUERY in e["movie_name"].lower()]
-    if REQUIRE_IMAX:
-        matches = [e for e in matches if e["is_imax"]]
+    for ev in events:
+        movie = matching_movie(ev["movie_name"], movies)
+        if not movie:
+            continue
+        if require_imax and not ev["is_imax"]:
+            continue
 
-    for ev in matches:
         eid = str(ev["event_id"])
+        link = ev["booking_link"] or (
+            f"{CINEMA_PAGE_URL}#/buy-tickets-by-cinema?in-cinema={CINEMA_ID}&at={day}&view-mode=list"
+        )
+        entry = {
+            "event_id": eid,
+            "movie_name": ev["movie_name"],
+            "movie_id": movie["id"],
+            "query": movie["query"],
+            "date": day,
+            "start_time": ev["start_time"],
+            "auditorium": ev["auditorium"],
+            "availability": ev["availability"],
+            "sold_out": ev["sold_out"],
+            "is_imax": ev["is_imax"],
+            "booking_link": link,
+        }
+        results.append(entry)
+
         if ev["sold_out"]:
             log.info("%s: '%s' found but SOLD OUT (event %s)", day, ev["movie_name"], eid)
             continue
         if eid in state["notified_event_ids"]:
             continue  # already notified
 
-        link = ev["booking_link"] or f"{CINEMA_PAGE_URL}#/buy-tickets-by-cinema?in-cinema={CINEMA_ID}&at={day}&view-mode=list"
-        time_part = (ev["start_time"] or "").replace("T", " ")
-        avail_pct = f"{ev['availability'] * 100:.0f}% seats free" if ev["availability"] is not None else ""
-        auditorium = ev["auditorium"] or ""
-        notify(
-            title=f"Tickets available: {ev['movie_name']}",
-            message=f"{time_part} — {auditorium}. {avail_pct}".strip(),
-            url=link,
-        )
-        state["notified_event_ids"].append(eid)
+        new_matches.append(entry)
+
+
+def summarize_new_matches(new_matches: list[dict]) -> tuple[str, str]:
+    counts: dict[str, int] = {}
+    for m in new_matches:
+        counts[m["movie_name"]] = counts.get(m["movie_name"], 0) + 1
+    title = f"{len(new_matches)} new showtime{'s' if len(new_matches) != 1 else ''} available"
+    message = ", ".join(f"{name}: {count}" for name, count in counts.items())
+    return title, message
 
 
 def run_once(state: dict) -> None:
+    config = storage.load_config()
     today = date.today()
     seen_auditoriums = set()
+    results: list[dict] = []
+    new_matches: list[dict] = []
     for offset in range(DATE_RANGE_DAYS):
         day = (today + timedelta(days=offset)).isoformat()
-        check_date(day, state, seen_auditoriums)
+        check_date(
+            day, state, seen_auditoriums, config["movies"], config["require_imax"], results, new_matches
+        )
     if seen_auditoriums:
         log.debug("Auditoriums seen this cycle: %s", sorted(seen_auditoriums))
+    results.sort(key=lambda r: r["start_time"] or "")
+    storage.save_results(results)
+
+    if new_matches:
+        title, message = summarize_new_matches(new_matches)
+        # Only mark these as notified if the push actually went through, so a
+        # failed/rate-limited push gets retried next cycle instead of being
+        # silently dropped.
+        if notify(title, message, url=WEBUI_URL):
+            state["notified_event_ids"].extend(m["event_id"] for m in new_matches)
+
     save_state(state)
 
 
 def main() -> None:
+    config = storage.load_config()
+    titles = [m["title"] for m in config["movies"]]
     log.info(
-        "Starting cinemacity-scraper: cinema=%s query=%r imax_only=%s interval=%ss",
-        CINEMA_ID, MOVIE_QUERY, REQUIRE_IMAX, POLL_INTERVAL_SECONDS,
+        "Starting cinemacity-scraper: cinema=%s movies=%r imax_only=%s interval=%ss",
+        CINEMA_ID, titles, config["require_imax"], POLL_INTERVAL_SECONDS,
     )
     state = load_state()
-    notify("cinemacity-scraper started", f"Watching for '{MOVIE_QUERY}' at Praha Flora", priority="low")
+    notify(
+        "cinemacity-scraper started",
+        f"Watching for {', '.join(titles) or 'nothing yet'} at Praha Flora",
+        url=WEBUI_URL,
+        priority="low",
+    )
 
     while True:
         try:
