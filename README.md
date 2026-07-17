@@ -16,9 +16,10 @@ Two processes share one image and one `/data` volume:
   when new matches appear (deep-linking to the web UI, not to a single
   showtime).
 - `webui.py` — a small local-only Flask app for searching [TMDb](https://www.themoviedb.org/)
-  to add movies to watch (poster/runtime/overview shown for each), editing
-  the Cinema City match text per movie, and browsing each movie's matching
-  showtimes with clickable booking links.
+  to add movies to watch (poster/runtime/overview shown for each), and for
+  each movie: which formats to check for (IMAX/3D/2D), how often, its
+  Cinema City match text, and browsing its matching showtimes with
+  clickable booking links.
 
 ## How it works
 
@@ -38,8 +39,10 @@ Key findings baked into `scraper.py`:
 - **Sold-out detection**: the `soldOut` flag is unreliable alone (observed
   `false` at <1% seat availability), so `availabilityRatio <= 0` is checked
   as a backup.
-- **IMAX detection**: `auditoriumTinyName == "IMAX"` (primary) or `"70-mm"`
-  in `attributeIds` (secondary), used together for redundancy.
+- **Format detection**: IMAX via `auditoriumTinyName == "IMAX"` (primary)
+  or `"70-mm"` in `attributeIds` (secondary, for redundancy); 3D via the
+  `"3d"` attribute tag; everything else is treated as 2D. These are the
+  only formats observed at Praha Flora so far.
 - **Booking links**: the raw `bookingLink` field points at
   `tickets.cinemacity.cz/api/order/{id}`, which 404s — the working link
   drops the `/api/` segment.
@@ -48,9 +51,10 @@ Key findings baked into `scraper.py`:
 
 ## Configuration
 
-The watched movie list and IMAX toggle live in `/data/config.json`, managed
-through the web UI — not through env vars (except as one-time seed values,
-see below). Everything else is an environment variable:
+The watched movie list — including each movie's required formats, check
+frequency, and match text — lives in `/data/config.json`, managed through
+the web UI, not through env vars (except as one-time seed values, see
+below). Everything else is an environment variable:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -58,7 +62,7 @@ see below). Everything else is an environment variable:
 | `SITE_ID` | `10101` | Country/site code (`10101` = CZ) |
 | `LANG_CODE` | `cs_CZ` | API response language |
 | `MOVIE_QUERY` | `dune` | Seeds `config.json`'s watch list *only* if it doesn't exist yet |
-| `REQUIRE_IMAX` | `true` | Only match IMAX auditoriums (also just a seed value after first run) |
+| `REQUIRE_IMAX` | `true` | One-time seed only: if `true`, movies get "IMAX" as their default required format when first created; each movie's required formats are then edited per-movie in the web UI |
 | `DATE_RANGE_DAYS` | `21` | How many days ahead to poll |
 | `POLL_INTERVAL_SECONDS` | `120` | Delay between poll cycles |
 | `NTFY_TOPIC` | — | Your ntfy.sh topic (pick something unguessable — topics are public) |
@@ -109,14 +113,21 @@ services:
 
 ## Web UI
 
-- **Search** — type a title, pick from the TMDb results dropdown; the movie
-  is added immediately with its poster/runtime/overview and a default match
-  string (the lowercased TMDb title).
-- **Match text** — editable per movie on its detail page. Cinema City
+- **Search** — type a title and pick from the TMDb results dropdown (arrow
+  keys + Enter work too). This opens an "Add movie" dialog to choose which
+  formats to check for before the movie is actually added — **no format
+  selected means the movie matches nothing** until you pick at least one.
+  It's added with its poster/runtime/overview and a default match string
+  (the lowercased TMDb title).
+- **Per-movie settings** — a gear icon on each movie's page opens a dialog
+  for its required formats (IMAX/3D/2D), check frequency (2 minutes to 1
+  day, or off), and match text. Match text is editable because Cinema City
   listings are in Czech, so the auto-derived English title often won't
   match and needs manual tuning once the film shows up on the site.
 - **Movie detail page** — shows every currently matching showtime for that
-  movie with availability % and a working `Book` link.
+  movie (format, audio language, subtitles, availability %, a working
+  `Book` link), with filters built dynamically from whatever values
+  actually appear in the results.
 
 ## Limitations
 
