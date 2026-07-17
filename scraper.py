@@ -27,11 +27,12 @@ import json
 import logging
 import os
 import sys
-import time
+import threading
 from datetime import date, timedelta
 from pathlib import Path
 
 import requests
+from flask import Flask
 
 import storage
 
@@ -39,7 +40,11 @@ import storage
 
 CINEMA_ID = os.environ.get("CINEMA_ID", "1052")  # Praha Flora
 SITE_ID = os.environ.get("SITE_ID", "10101")  # CZ site code used in the API path
-LANG = os.environ.get("LANG_CODE", "cs_CZ")
+# Confirmed live on 2026-07-17: the API accepts lang=en_US and returns film
+# names in English (e.g. "The Odyssey" instead of "Odyssea") for the same
+# events/auditoriums/booking links as cs_CZ — this lets movie match text
+# default straight to the TMDb title instead of needing a Czech translation.
+LANG = os.environ.get("LANG_CODE", "en_US")
 # Confirmed live on 2026-07-17 against a real IMAX screening (Odyssea,
 # 2026-07-17T20:30 at Flora): the IMAX auditorium reports
 # auditoriumTinyName="IMAX" (auditorium="IMAX VOLVO") AND carries the
@@ -57,6 +62,9 @@ NTFY_URL = os.environ.get("NTFY_URL", f"https://ntfy.sh/{NTFY_TOPIC}")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://10.0.0.32:8090")
 STATE_FILE = Path(os.environ.get("STATE_FILE", "/data/state.json"))
 DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
+# Internal-only control port (not published to the host) that webui.py hits
+# to trigger an immediate poll cycle instead of waiting for the interval.
+CONTROL_PORT = int(os.environ.get("CONTROL_PORT", "5001"))
 
 BASE_URL = (
     f"https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/{SITE_ID}"
@@ -256,31 +264,57 @@ def summarize_new_matches(new_matches: list[dict]) -> tuple[str, str]:
     return title, message
 
 
+CHECKING = threading.Event()
+
+
 def run_once(state: dict) -> None:
-    config = storage.load_config()
-    today = date.today()
-    seen_auditoriums = set()
-    results: list[dict] = []
-    new_matches: list[dict] = []
-    for offset in range(DATE_RANGE_DAYS):
-        day = (today + timedelta(days=offset)).isoformat()
-        check_date(
-            day, state, seen_auditoriums, config["movies"], config["require_imax"], results, new_matches
-        )
-    if seen_auditoriums:
-        log.debug("Auditoriums seen this cycle: %s", sorted(seen_auditoriums))
-    results.sort(key=lambda r: r["start_time"] or "")
-    storage.save_results(results)
+    CHECKING.set()
+    try:
+        config = storage.load_config()
+        today = date.today()
+        seen_auditoriums = set()
+        results: list[dict] = []
+        new_matches: list[dict] = []
+        for offset in range(DATE_RANGE_DAYS):
+            day = (today + timedelta(days=offset)).isoformat()
+            check_date(
+                day, state, seen_auditoriums, config["movies"], config["require_imax"], results, new_matches
+            )
+        if seen_auditoriums:
+            log.debug("Auditoriums seen this cycle: %s", sorted(seen_auditoriums))
+        results.sort(key=lambda r: r["start_time"] or "")
+        storage.save_results(results)
 
-    if new_matches:
-        title, message = summarize_new_matches(new_matches)
-        # Only mark these as notified if the push actually went through, so a
-        # failed/rate-limited push gets retried next cycle instead of being
-        # silently dropped.
-        if notify(title, message, url=WEBUI_URL):
-            state["notified_event_ids"].extend(m["event_id"] for m in new_matches)
+        if new_matches:
+            title, message = summarize_new_matches(new_matches)
+            # Only mark these as notified if the push actually went through, so a
+            # failed/rate-limited push gets retried next cycle instead of being
+            # silently dropped.
+            if notify(title, message, url=WEBUI_URL):
+                state["notified_event_ids"].extend(m["event_id"] for m in new_matches)
 
-    save_state(state)
+        save_state(state)
+    finally:
+        CHECKING.clear()
+
+
+def start_control_server(wake_event: threading.Event) -> None:
+    """Internal-only HTTP control port so webui.py can wake the poll loop
+    early instead of waiting out the full interval."""
+    control_app = Flask(__name__)
+    control_app.logger.disabled = True
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+    @control_app.route("/check-now", methods=["POST"])
+    def check_now():
+        wake_event.set()
+        return {"ok": True}
+
+    @control_app.route("/status", methods=["GET"])
+    def control_status():
+        return {"checking": CHECKING.is_set()}
+
+    control_app.run(host="0.0.0.0", port=CONTROL_PORT)
 
 
 def main() -> None:
@@ -298,12 +332,16 @@ def main() -> None:
         priority="low",
     )
 
+    wake_event = threading.Event()
+    threading.Thread(target=start_control_server, args=(wake_event,), daemon=True).start()
+
     while True:
         try:
             run_once(state)
         except Exception:
             log.exception("Unhandled error during poll cycle")
-        time.sleep(POLL_INTERVAL_SECONDS)
+        wake_event.wait(POLL_INTERVAL_SECONDS)
+        wake_event.clear()
 
 
 if __name__ == "__main__":

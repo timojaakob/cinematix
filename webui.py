@@ -19,6 +19,7 @@ import storage
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMG_BASE = "https://image.tmdb.org/t/p"
+SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://cinemacity-scraper:5001")
 
 app = Flask(__name__)
 
@@ -153,6 +154,26 @@ def update_query(movie_id):
         abort(404)
     storage.update_movie_query(config, movie_id, request.form.get("query", ""))
     return redirect(url_for("movie_detail", movie_id=movie_id))
+
+
+@app.route("/check-now", methods=["POST"])
+def check_now():
+    try:
+        requests.post(f"{SCRAPER_CONTROL_URL}/check-now", timeout=5)
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    return jsonify({"ok": True})
+
+
+@app.route("/api/status", methods=["GET"])
+def api_status():
+    checking = False
+    try:
+        resp = requests.get(f"{SCRAPER_CONTROL_URL}/status", timeout=3)
+        checking = resp.json().get("checking", False)
+    except requests.RequestException:
+        pass
+    return jsonify({"updated_at": storage.load_results()["updated_at"], "checking": checking})
 
 
 if __name__ == "__main__":

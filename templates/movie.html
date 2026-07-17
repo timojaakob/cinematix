@@ -58,6 +58,8 @@
   }
   a.book:hover { background: #3b6ea5; color: white; }
   .empty { color: #777; font-style: italic; padding: 0.5rem 0; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; }
+  #check-now-status { font-size: 0.78rem; color: #999; margin-left: 0.6rem; }
 </style>
 </head>
 <body>
@@ -88,8 +90,57 @@
   </section>
 
   <section>
-    <h2>Showtimes {% if updated_at %}<span class="subtitle" style="margin:0;">— last checked {{ updated_at }}</span>{% endif %}</h2>
+    <div class="section-head">
+      <h2>Showtimes {% if updated_at %}<span class="subtitle" style="margin:0;">— last checked {{ updated_at }}</span>{% endif %}</h2>
+      <div>
+        <button id="check-now-btn" type="button">Check now</button>
+        <span id="check-now-status"></span>
+      </div>
+    </div>
     {% include "_results_table.html" %}
   </section>
+
+<script>
+const lastUpdatedAt = {{ updated_at | tojson }};
+const btn = document.getElementById('check-now-btn');
+const status = document.getElementById('check-now-status');
+
+async function waitForResult() {
+  btn.disabled = true;
+  status.textContent = 'Checking…';
+  for (let i = 0; i < 40; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const resp = await fetch('{{ url_for("api_status") }}');
+    const data = await resp.json();
+    if (data.updated_at && data.updated_at !== lastUpdatedAt) {
+      window.location.reload();
+      return;
+    }
+    if (!data.checking) break;
+  }
+  status.textContent = 'Still checking — refresh in a bit.';
+  btn.disabled = false;
+}
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  status.textContent = 'Checking…';
+  try {
+    await fetch('{{ url_for("check_now") }}', { method: 'POST' });
+  } catch (e) {
+    status.textContent = 'Could not reach the scraper.';
+    btn.disabled = false;
+    return;
+  }
+  waitForResult();
+});
+
+// If a check (triggered here or elsewhere) is already running when the
+// page loads, reflect that instead of letting the button be clicked again.
+fetch('{{ url_for("api_status") }}')
+  .then(r => r.json())
+  .then(data => { if (data.checking) waitForResult(); })
+  .catch(() => {});
+</script>
 </body>
 </html>
