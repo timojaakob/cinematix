@@ -37,6 +37,7 @@
   .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
   .header h1 { font-size: 1.3rem; margin: 0 0 0.3rem; }
   .header .meta { color: #999; font-size: 0.85rem; margin-bottom: 0.6rem; }
+  .header .meta .rating { color: #e0b040; }
   .header .overview { font-size: 0.88rem; line-height: 1.5; color: #ccc; }
   .external-links { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
   .ext-link {
@@ -63,7 +64,9 @@
     padding: 0.2rem 0.5rem; border-radius: 5px; cursor: pointer;
   }
   .modal-close:hover { color: #eee; background: #262626; }
-  .modal-actions { display: flex; justify-content: flex-end; margin-top: 0.25rem; }
+  .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
+  .remove-movie-btn { background: transparent; color: #e06a6a; border: 1px solid #5a2e2e; }
+  .remove-movie-btn:hover { background: #3a1f1f; border-color: #e06a6a; }
   .settings-form { display: flex; flex-direction: column; align-items: flex-start; gap: 0.85rem; }
   .setting-row { display: flex; gap: 0.5rem; align-items: center; }
   .setting-row label { font-size: 0.8rem; color: #999; }
@@ -142,6 +145,12 @@
   th[data-sort-key] { cursor: pointer; user-select: none; white-space: nowrap; }
   th[data-sort-key]:hover { color: #ccc; }
   th[data-sort-key] .sort-arrow { color: #6aa8e0; margin-left: 0.25rem; }
+  .lang-tag {
+    display: flex; align-items: center; gap: 0.3rem;
+    font-size: 0.82rem; color: #ccc; line-height: 1;
+  }
+  .lang-tag + .lang-tag { margin-top: 0.25rem; }
+  .lang-tag svg { width: 14px; height: 14px; flex-shrink: 0; color: #999; }
   .subtitle-lang { color: #999; font-size: 0.78rem; }
   .sold-out { color: #e06a6a; }
   .avail { color: #7fbf7f; }
@@ -176,7 +185,8 @@
           </button>
         </div>
         <div class="meta">
-          {% if movie.runtime %}{{ movie.runtime }} min{% endif %}
+          {% if movie.rating %}<span class="rating">★ {{ movie.rating }}</span>{% endif %}
+          {% if movie.runtime %}{% if movie.rating %} · {% endif %}{{ movie.runtime }} min{% endif %}
           {% if movie.release_date %} · {{ movie.release_date | humandate }}{% endif %}
         </div>
         {% if movie.overview %}<div class="overview">{{ movie.overview }}</div>{% endif %}
@@ -225,11 +235,15 @@
             <input type="text" id="query" name="query" value="{{ movie.query }}">
           </div>
         </details>
-
-        <div class="modal-actions">
-          <button id="settings-apply-btn" type="submit" disabled>Apply changes</button>
-        </div>
       </form>
+
+      <div class="modal-actions">
+        <form method="post" action="{{ url_for('remove_movie', movie_id=movie.id) }}"
+              onsubmit="return confirm('Stop watching {{ movie.title }}?');">
+          <button type="submit" class="remove-movie-btn">Remove movie</button>
+        </form>
+        <button id="settings-apply-btn" type="submit" form="settings-form" disabled>Apply changes</button>
+      </div>
     </div>
   </div>
 

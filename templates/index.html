@@ -5,28 +5,68 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 <title>cinemacity-scraper</title>
+<script>
+// Resolve the theme before first paint so there's no flash of the wrong
+// mode: an explicit choice from the settings switch wins, otherwise fall
+// back to the OS-level preference.
+(function () {
+  var stored = localStorage.getItem('cinemacity-theme');
+  var theme = (stored === 'light' || stored === 'dark')
+    ? stored
+    : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
 <style>
-  :root { color-scheme: dark light; }
+  :root {
+    --bg: #111;
+    --text: #eee;
+    --text-secondary: #ccc;
+    --text-muted: #999;
+    --text-dim: #777;
+    --panel-bg: #1a1a1a;
+    --card-bg: #151515;
+    --border: #2a2a2a;
+    --input-bg: #0d0d0d;
+    --input-border: #333;
+    --hover-bg: #262626;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f4f5;
+    --text: #18181a;
+    --text-secondary: #3a3a3d;
+    --text-muted: #68686c;
+    --text-dim: #8a8a8e;
+    --panel-bg: #ffffff;
+    --card-bg: #fbfbfc;
+    --border: #e0e0e2;
+    --input-bg: #ffffff;
+    --input-border: #d4d4d7;
+    --hover-bg: #ececee;
+    color-scheme: light;
+  }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     max-width: 900px;
     margin: 2rem auto;
     padding: 0 1rem;
-    background: #111;
-    color: #eee;
+    background: var(--bg);
+    color: var(--text);
   }
   .brand { display: flex; align-items: center; gap: 0.6rem; }
   .brand img.logo { width: 36px; height: 36px; border-radius: 6px; }
+  .brand .icon-btn { margin-left: auto; }
   h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
-  .subtitle { color: #999; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  .subtitle { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
   section {
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 1rem 1.25rem;
     margin-bottom: 1.5rem;
   }
-  h2 { font-size: 1rem; margin-top: 0; color: #ccc; }
+  h2 { font-size: 1rem; margin-top: 0; color: var(--text-secondary); }
   button {
     background: #3b6ea5;
     color: white;
@@ -37,15 +77,22 @@
     cursor: pointer;
   }
   button:hover { background: #4a80bb; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; color: var(--text-muted); border: 1px solid var(--input-border);
+    border-radius: 6px; padding: 0.4rem; cursor: pointer; flex-shrink: 0;
+  }
+  .icon-btn svg { width: 17px; height: 17px; }
+  .icon-btn:hover { border-color: #3b6ea5; color: var(--text); }
 
   /* search */
   .search-wrap { position: relative; }
   input[type="text"] {
     width: 100%;
     box-sizing: border-box;
-    background: #0d0d0d;
-    color: #eee;
-    border: 1px solid #333;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--input-border);
     border-radius: 6px;
     padding: 0.6rem 0.75rem;
     font-size: 0.95rem;
@@ -55,14 +102,14 @@
     top: calc(100% + 4px);
     left: 0;
     right: 0;
-    background: #1a1a1a;
-    border: 1px solid #333;
+    background: var(--panel-bg);
+    border: 1px solid var(--input-border);
     border-radius: 6px;
     max-height: 340px;
     overflow-y: auto;
     z-index: 10;
     display: none;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   }
   #search-dropdown.open { display: block; }
   .search-row {
@@ -72,25 +119,26 @@
     cursor: pointer;
     align-items: center;
   }
-  .search-row:hover, .search-row.active { background: #262626; }
-  .search-row img { width: 32px; height: 48px; object-fit: cover; border-radius: 3px; background: #333; }
-  .search-row .thumb-placeholder { width: 32px; height: 48px; border-radius: 3px; background: #333; flex-shrink: 0; }
+  .search-row:hover, .search-row.active { background: var(--hover-bg); }
+  .search-row img { width: 32px; height: 48px; object-fit: cover; border-radius: 3px; background: var(--input-border); }
+  .search-row .thumb-placeholder { width: 32px; height: 48px; border-radius: 3px; background: var(--input-border); flex-shrink: 0; }
   .search-row .meta { font-size: 0.85rem; line-height: 1.3; }
-  .search-row .meta .title { color: #eee; }
-  .search-row .meta .year { color: #888; }
-  .search-empty { padding: 0.6rem 0.75rem; color: #777; font-size: 0.85rem; font-style: italic; }
+  .search-row .meta .title { color: var(--text); }
+  .search-row .meta .year { color: var(--text-muted); }
+  .search-empty { padding: 0.6rem 0.75rem; color: var(--text-dim); font-size: 0.85rem; font-style: italic; }
 
   /* movie grid */
   .movie-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-template-columns: repeat(auto-fill, 210px);
+    justify-content: start;
     gap: 1rem;
   }
-  .movie-card-wrap { position: relative; }
+  .movie-card-wrap { position: relative; width: 210px; }
   .movie-card {
     display: block;
-    background: #151515;
-    border: 1px solid #2a2a2a;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
     text-decoration: none;
@@ -101,32 +149,84 @@
     width: 100%;
     aspect-ratio: 2 / 3;
     object-fit: cover;
-    background: #262626;
+    background: var(--hover-bg);
     display: block;
   }
   .movie-card .poster-placeholder {
     width: 100%;
     aspect-ratio: 2 / 3;
-    background: #262626;
+    background: var(--hover-bg);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #555;
+    color: var(--text-dim);
     font-size: 0.75rem;
     text-align: center;
     padding: 0.5rem;
     box-sizing: border-box;
   }
-  .movie-card .info { padding: 0.6rem; }
-  .movie-card .title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.2rem; }
-  .movie-card .runtime { font-size: 0.75rem; color: #999; margin-bottom: 0.3rem; }
-  .movie-card .overview { font-size: 0.72rem; color: #aaa; line-height: 1.35; }
-  .remove-btn {
+  .movie-card .info { padding: 0.6rem; min-height: 5.3rem; box-sizing: border-box; }
+  .movie-card .title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 0.3rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .movie-card .runtime,
+  .movie-card .release-date {
+    font-size: 0.75rem;
+    line-height: 1.3;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .movie-card .runtime { margin-bottom: 0.15rem; }
+  .remove-control {
     position: absolute;
     top: 6px;
     right: 6px;
+    z-index: 2;
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .remove-confirm-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #b53c3c;
+    color: #fff;
+    border: none;
+    border-radius: 11px;
+    height: 22px;
+    max-width: 0;
+    padding: 0;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    opacity: 0;
+    cursor: pointer;
+    transition: max-width 0.2s ease, opacity 0.15s ease, padding 0.2s ease;
+  }
+  .remove-control.confirming .remove-confirm-btn {
+    max-width: 200px;
+    padding: 0 0.6rem;
+    opacity: 1;
+  }
+  .remove-btn {
+    flex-shrink: 0;
     width: 22px;
     height: 22px;
+    box-sizing: border-box;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 50%;
     background: rgba(0,0,0,0.6);
     color: #eee;
@@ -135,45 +235,82 @@
     font-size: 0.8rem;
     line-height: 1;
   }
-  .remove-btn:hover { background: #b53c3c; }
-  .empty { color: #777; font-style: italic; padding: 0.5rem 0; }
+  .remove-btn:hover, .remove-control.confirming .remove-btn { background: #b53c3c; }
+  .empty { color: var(--text-dim); font-style: italic; padding: 0.5rem 0; }
 
-  /* add-movie dialog */
+  /* add-movie / settings dialogs */
   .modal-overlay {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
     align-items: center; justify-content: center; z-index: 100; padding: 1rem;
   }
   .modal-overlay.open { display: flex; }
   .modal {
-    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px;
     padding: 1.1rem 1.4rem 1.4rem; width: 100%; max-width: 420px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
   }
   .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; gap: 0.75rem; }
-  .modal-header h2 { margin: 0; font-size: 1rem; color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .modal-header h2 { margin: 0; font-size: 1rem; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .modal-close {
-    background: transparent; border: none; color: #999; font-size: 1.2rem; line-height: 1;
+    background: transparent; border: none; color: var(--text-muted); font-size: 1.2rem; line-height: 1;
     padding: 0.2rem 0.5rem; border-radius: 5px; cursor: pointer; flex-shrink: 0;
   }
-  .modal-close:hover { color: #eee; background: #262626; }
+  .modal-close:hover { color: var(--text); background: var(--hover-bg); }
   .modal-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
   .setting-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
-  .setting-row label { font-size: 0.8rem; color: #999; }
+  .setting-row label { font-size: 0.8rem; color: var(--text-muted); }
   .format-checkboxes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-  .setting-hint { margin: 0.6rem 0 0; font-size: 0.75rem; color: #777; }
+  .setting-hint { margin: 0.6rem 0 0; font-size: 0.75rem; color: var(--text-dim); }
   label.day-toggle {
-    display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: #ccc;
-    cursor: pointer; border: 1px solid #333; border-radius: 5px; padding: 0.2rem 0.5rem;
+    display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);
+    cursor: pointer; border: 1px solid var(--input-border); border-radius: 5px; padding: 0.2rem 0.5rem;
   }
-  label.day-toggle:has(input:checked) { border-color: #3b6ea5; color: #eee; }
+  label.day-toggle:has(input:checked) { border-color: #3b6ea5; color: var(--text); }
+
+  /* theme switch */
+  .theme-switch { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); }
+  .theme-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .theme-switch-track {
+    position: relative; width: 40px; height: 22px; border-radius: 11px;
+    background: var(--input-border); transition: background 0.2s ease; flex-shrink: 0;
+  }
+  .theme-switch-thumb {
+    position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--panel-bg); transition: transform 0.2s ease;
+  }
+  .theme-switch input:checked + .theme-switch-track { background: #3b6ea5; }
+  .theme-switch input:checked + .theme-switch-track .theme-switch-thumb { transform: translateX(18px); }
 </style>
 </head>
 <body>
   <div class="brand">
     <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
     <h1>cinemacity-scraper</h1>
+    <button id="settings-btn" type="button" class="icon-btn" aria-label="Settings" aria-haspopup="dialog" aria-controls="settings-overlay">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 13.09H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </button>
   </div>
   <p class="subtitle">Praha Flora</p>
+
+  <div id="settings-overlay" class="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-header">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-close-btn" type="button" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="setting-row">
+        <label>Appearance</label>
+        <label class="theme-switch">
+          <input type="checkbox" id="theme-switch-input">
+          <span class="theme-switch-track"><span class="theme-switch-thumb"></span></span>
+          <span id="theme-switch-label">Dark mode</span>
+        </label>
+      </div>
+    </div>
+  </div>
 
   <section>
     <h2>Search movies</h2>
@@ -210,9 +347,9 @@
     <div class="movie-grid">
       {% for m in movies %}
       <div class="movie-card-wrap">
-        <form method="post" action="{{ url_for('remove_movie', movie_id=m.id) }}"
-              onsubmit="return confirm('Stop watching {{ m.title }}?');">
-          <button type="submit" class="remove-btn" title="Remove">×</button>
+        <form method="post" action="{{ url_for('remove_movie', movie_id=m.id) }}" class="remove-control">
+          <button type="button" class="remove-confirm-btn">Remove from Watched?</button>
+          <button type="button" class="remove-btn" title="Remove">×</button>
         </form>
         <a class="movie-card" href="{{ url_for('movie_detail', movie_id=m.id) }}">
           {% if m.poster_url %}
@@ -223,9 +360,7 @@
           <div class="info">
             <div class="title">{{ m.title }}</div>
             {% if m.runtime %}<div class="runtime">{{ m.runtime }} min</div>{% endif %}
-            {% if m.overview %}
-              <div class="overview">{{ m.overview[:110] }}{% if m.overview|length > 110 %}…{% endif %}</div>
-            {% endif %}
+            {% if m.release_date %}<div class="release-date">{{ m.release_date | humandate(with_time=False) }}</div>{% endif %}
           </div>
         </a>
       </div>
@@ -362,6 +497,67 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.search-wrap')) {
     dropdown.classList.remove('open');
   }
+});
+
+// --- Remove-movie confirmation: clicking the × slides a "Remove from
+// Watched?" button out to its left instead of popping a native confirm(). ---
+document.querySelectorAll('.remove-control').forEach((control) => {
+  const removeBtn = control.querySelector('.remove-btn');
+  const confirmBtn = control.querySelector('.remove-confirm-btn');
+
+  removeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const isOpen = control.classList.contains('confirming');
+    document.querySelectorAll('.remove-control.confirming').forEach((c) => {
+      if (c !== control) c.classList.remove('confirming');
+    });
+    control.classList.toggle('confirming', !isOpen);
+  });
+
+  confirmBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    control.submit();
+  });
+});
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.remove-control')) {
+    document.querySelectorAll('.remove-control.confirming').forEach((c) => c.classList.remove('confirming'));
+  }
+});
+
+// --- Settings modal + theme switch. The theme itself was already applied
+// pre-paint by the inline script in <head>; this just syncs the switch to
+// match and persists explicit choices for every page to pick up. ---
+const THEME_KEY = 'cinemacity-theme';
+const themeInput = document.getElementById('theme-switch-input');
+const themeLabel = document.getElementById('theme-switch-label');
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeInput.checked = theme === 'light';
+  themeLabel.textContent = theme === 'light' ? 'Light mode' : 'Dark mode';
+}
+
+applyTheme(document.documentElement.dataset.theme || 'dark');
+
+themeInput.addEventListener('change', () => {
+  const theme = themeInput.checked ? 'light' : 'dark';
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme(theme);
+});
+
+const settingsBtn = document.getElementById('settings-btn');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+
+settingsBtn.addEventListener('click', () => settingsOverlay.classList.add('open'));
+settingsCloseBtn.addEventListener('click', () => settingsOverlay.classList.remove('open'));
+settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === settingsOverlay) settingsOverlay.classList.remove('open');
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) settingsOverlay.classList.remove('open');
 });
 </script>
 </body>

@@ -67,7 +67,7 @@ below). Everything else is an environment variable:
 | `POLL_INTERVAL_SECONDS` | `120` | Delay between poll cycles |
 | `NTFY_TOPIC` | — | Your ntfy.sh topic (pick something unguessable — topics are public) |
 | `NTFY_URL` | `https://ntfy.sh/{NTFY_TOPIC}` | Override for a self-hosted ntfy instance |
-| `WEBUI_URL` | `http://10.0.0.32:8090` | Click-through link on ntfy notifications (point this at wherever the web UI is reachable) |
+| `WEBUI_URL` | `https://cine.vfk.ovh` | Click-through link on ntfy notifications (point this at wherever the web UI is reachable) |
 | `STATE_FILE` | `/data/state.json` | Dedup state so repeat polls don't re-notify |
 | `TMDB_API_KEY` | — | Required by `webui.py` only, for movie search (free key from [themoviedb.org](https://www.themoviedb.org/settings/api)) |
 | `DEBUG` | `false` | Verbose logging, including raw API payloads |
@@ -119,6 +119,12 @@ services:
   selected means the movie matches nothing** until you pick at least one.
   It's added with its poster/runtime/overview and a default match string
   (the lowercased TMDb title).
+- **Watched movies grid** — fixed-size cards showing poster, title, runtime,
+  and release date. Clicking the × on a card slides out a "Remove from
+  Watched?" button in place rather than popping a native confirm dialog.
+- **Global settings** — a gear icon next to the title opens a settings
+  dialog; currently just a dark/light mode switch (defaults to your OS
+  preference, remembered after that via `localStorage`).
 - **Per-movie settings** — a gear icon on each movie's page opens a dialog
   for its required formats (IMAX/3D/2D), check frequency (2 minutes to 1
   day, or off), match text, and removing the movie from the watch list.
@@ -127,9 +133,9 @@ services:
   once the film shows up on the site.
 - **Movie detail page** — shows the TMDb rating alongside runtime/release
   date, IMDb/TMDb links, and every currently matching showtime (format,
-  audio language, subtitles, availability %, a working `Book` link), with
-  filters built dynamically from whatever values actually appear in the
-  results.
+  audio/subtitle language as a code next to a dub/captions icon,
+  availability %, a working `Book` link), with filters built dynamically
+  from whatever values actually appear in the results.
 
 ## Limitations
 
@@ -139,7 +145,10 @@ services:
   API).
 - Title matching is a plain substring match against the Czech listing
   title, which may differ from the film's English/TMDb title.
-- The web UI has no authentication — only run it on a trusted LAN.
+- The web UI has no authentication of its own — this deployment puts it
+  behind Traefik + Authelia (see the repo root's `docker-compose.yml`), but
+  if you run it standalone, only expose it on a trusted network or behind
+  your own auth layer.
 
 ## Credits
 

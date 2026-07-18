@@ -59,7 +59,7 @@ DATE_RANGE_DAYS = int(os.environ.get("DATE_RANGE_DAYS", "21"))
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "120"))
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "media-server-timo-8k3p")
 NTFY_URL = os.environ.get("NTFY_URL", f"https://ntfy.sh/{NTFY_TOPIC}")
-WEBUI_URL = os.environ.get("WEBUI_URL", "http://10.0.0.32:8090")
+WEBUI_URL = os.environ.get("WEBUI_URL", "https://cine.vfk.ovh")
 STATE_FILE = Path(os.environ.get("STATE_FILE", "/data/state.json"))
 DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 # Internal-only control port (not published to the host) that webui.py hits
@@ -175,7 +175,9 @@ def extract_events(payload: dict) -> list[dict]:
                 or IMAX_ATTRIBUTE_TAG in attrs_str
             )
 
-        audio_language, subtitle_language = audio_and_subtitle_languages(ev.get("languages") or {})
+        audio_language, audio_language_code, subtitle_language, subtitle_language_code = (
+            audio_and_subtitle_languages(ev.get("languages") or {})
+        )
         format_ = detect_format(attrs_set, is_imax)
 
         normalized.append(
@@ -191,7 +193,9 @@ def extract_events(payload: dict) -> list[dict]:
                 "start_time": ev.get("eventDateTime"),
                 "booking_link": clean_booking_link(ev.get("bookingLink")),
                 "audio_language": audio_language,
+                "audio_language_code": audio_language_code,
                 "subtitle_language": subtitle_language,
+                "subtitle_language_code": subtitle_language_code,
                 "raw": ev if DEBUG else None,
             }
         )
@@ -230,18 +234,21 @@ def language_name(code: str | None) -> str | None:
     return LANGUAGE_NAMES.get(code.lower(), code.upper())
 
 
-def audio_and_subtitle_languages(languages: dict) -> tuple[str | None, str | None]:
+def audio_and_subtitle_languages(languages: dict) -> tuple[str | None, str | None, str | None, str | None]:
     """What the audience actually hears is the dub/voiceover if one was
-    recorded for this showtime, otherwise the film's original audio."""
+    recorded for this showtime, otherwise the film's original audio.
+    Returns (audio_name, audio_code, subtitle_name, subtitle_code)."""
     dubbed = languages.get("dubbed") or []
     voiceover = languages.get("voiceover") or []
     original = languages.get("original") or []
     subtitles = languages.get("subtitles") or []
 
     audio_codes = dubbed or voiceover or original
-    audio = language_name(audio_codes[0]) if audio_codes else None
-    subtitle = language_name(subtitles[0]) if subtitles else None
-    return audio, subtitle
+    audio_code = audio_codes[0].lower() if audio_codes else None
+    subtitle_code = subtitles[0].lower() if subtitles else None
+    audio = language_name(audio_code)
+    subtitle = language_name(subtitle_code)
+    return audio, audio_code, subtitle, subtitle_code
 
 
 def matching_movie(movie_name: str, movies: list[dict]) -> dict | None:
@@ -316,7 +323,9 @@ def check_date(
             "format": ev["format"],
             "booking_link": link,
             "audio_language": ev["audio_language"],
+            "audio_language_code": ev["audio_language_code"],
             "subtitle_language": ev["subtitle_language"],
+            "subtitle_language_code": ev["subtitle_language_code"],
         }
         results.append(entry)
 

@@ -140,6 +140,7 @@ def tmdb_details(tmdb_id: int) -> dict | None:
         "poster_url": f"{TMDB_IMG_BASE}/w342{d['poster_path']}" if d.get("poster_path") else None,
         "release_date": d.get("release_date") or "",
         "imdb_id": d.get("imdb_id") or None,
+        "rating": round(d["vote_average"], 1) if d.get("vote_average") else None,
     }
 
 
@@ -179,6 +180,7 @@ def add_movie():
         "overview": details["overview"],
         "runtime": details["runtime"],
         "release_date": details["release_date"],
+        "rating": details["rating"],
         "added_at": datetime.now().isoformat(timespec="seconds"),
         "check_interval_seconds": storage.DEFAULT_CHECK_INTERVAL_SECONDS,
         "last_checked_at": None,
