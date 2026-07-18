@@ -87,6 +87,16 @@
 
   /* search */
   .search-wrap { position: relative; }
+  .search-wrap .search-icon {
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 17px;
+    height: 17px;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
   input[type="text"] {
     width: 100%;
     box-sizing: border-box;
@@ -94,7 +104,7 @@
     color: var(--text);
     border: 1px solid var(--input-border);
     border-radius: 6px;
-    padding: 0.6rem 0.75rem;
+    padding: 0.6rem 0.75rem 0.6rem 2.25rem;
     font-size: 0.95rem;
   }
   #search-dropdown {
@@ -248,6 +258,7 @@
     background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px;
     padding: 1.1rem 1.4rem 1.4rem; width: 100%; max-width: 420px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    max-height: 85vh; overflow-y: auto; box-sizing: border-box;
   }
   .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; gap: 0.75rem; }
   .modal-header h2 { margin: 0; font-size: 1rem; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -257,15 +268,37 @@
   }
   .modal-close:hover { color: var(--text); background: var(--hover-bg); }
   .modal-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
-  .setting-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .setting-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; }
+  .setting-row:last-child { margin-bottom: 0; }
   .setting-row label { font-size: 0.8rem; color: var(--text-muted); }
   .format-checkboxes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-  .setting-hint { margin: 0.6rem 0 0; font-size: 0.75rem; color: var(--text-dim); }
+  .setting-hint { margin: 0.3rem 0 0; font-size: 0.75rem; color: var(--text-dim); }
   label.day-toggle {
     display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);
     cursor: pointer; border: 1px solid var(--input-border); border-radius: 5px; padding: 0.2rem 0.5rem;
   }
   label.day-toggle:has(input:checked) { border-color: #3b6ea5; color: var(--text); }
+  .setting-row select,
+  .setting-row input[type="text"],
+  .setting-row input[type="password"] {
+    background: var(--input-bg); color: var(--text); border: 1px solid var(--input-border);
+    border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.85rem; width: 100%; box-sizing: border-box;
+  }
+  .setting-row select { cursor: pointer; width: auto; }
+  .setting-group { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; }
+  .notify-case { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; width: 100%; }
+  .notify-case select { flex-shrink: 0; }
+  .setting-row label.checkbox {
+    display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer;
+  }
+  .input-with-toggle { display: flex; gap: 0.4rem; align-items: center; width: 100%; }
+  .input-with-toggle input { flex: 1; min-width: 0; }
+  .input-with-toggle button { flex-shrink: 0; }
+  .icon-btn.icon-only { padding: 0.4rem; flex-shrink: 0; }
+  .setting-hint.error { color: #e06a6a; }
+  .setting-hint.success { color: #7fbf7f; }
+  .icon-btn.icon-only svg { width: 16px; height: 16px; }
+  button:disabled, button:disabled:hover { background: #555; cursor: default; }
 
   /* theme switch */
   .theme-switch { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); }
@@ -309,12 +342,84 @@
           <span id="theme-switch-label">Dark mode</span>
         </label>
       </div>
+
+      <form id="global-settings-form" method="post" action="{{ url_for('update_global_settings') }}">
+        <div class="setting-row">
+          <label for="default_check_interval">Default check frequency</label>
+          <select id="default_check_interval" name="default_check_interval">
+            {% for seconds, label in check_interval_options %}
+            <option value="{{ seconds }}" {% if settings.default_check_interval_seconds == seconds %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+            <option value="off" {% if settings.default_check_interval_seconds is none %}selected{% endif %}>Off</option>
+          </select>
+          <p class="setting-hint">Used for newly added movies — each one can still be changed individually.</p>
+        </div>
+
+        <div class="setting-row">
+          <label>Notifications</label>
+          <div class="setting-group">
+            <div class="notify-case">
+              <label class="checkbox">
+                <input type="checkbox" name="notify_on_start" {% if settings.notify_on_start %}checked{% endif %}>
+                Scraper started
+              </label>
+              <select name="notify_on_start_priority">
+                {% for p in ntfy_priority_options %}
+                <option value="{{ p }}" {% if settings.notify_on_start_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="notify-case">
+              <label class="checkbox">
+                <input type="checkbox" name="notify_on_new_showtime" {% if settings.notify_on_new_showtime %}checked{% endif %}>
+                New showtime found
+              </label>
+              <select name="notify_on_new_showtime_priority">
+                {% for p in ntfy_priority_options %}
+                <option value="{{ p }}" {% if settings.notify_on_new_showtime_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <label for="ntfy_endpoint">ntfy endpoint</label>
+          <div class="input-with-toggle">
+            <input type="text" id="ntfy_endpoint" name="ntfy_endpoint" value="{{ settings.ntfy_endpoint }}" placeholder="https://ntfy.sh/your-topic" autocomplete="off" spellcheck="false">
+            <button type="button" id="ntfy-test-btn">Test</button>
+          </div>
+          <p id="ntfy-test-status" class="setting-hint" style="display:none;"></p>
+        </div>
+
+        <div class="setting-row">
+          <label for="tmdb_api_key">TMDb API key</label>
+          <div class="input-with-toggle">
+            <input type="password" id="tmdb_api_key" name="tmdb_api_key" value="{{ settings.tmdb_api_key }}" autocomplete="off" spellcheck="false">
+            <button type="button" id="tmdb-key-toggle" class="icon-btn icon-only" aria-label="Show API key" aria-pressed="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+                <line id="tmdb-key-eye-slash" x1="2" y1="2" x2="22" y2="22" style="display:none"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="global-settings-apply-btn" type="submit" disabled>Save</button>
+        </div>
+      </form>
     </div>
   </div>
 
   <section>
     <h2>Search movies</h2>
     <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
       <input type="text" id="movie-search" placeholder="Search for a movie…" autocomplete="off">
       <div id="search-dropdown"></div>
     </div>
@@ -342,13 +447,13 @@
   </div>
 
   <section>
-    <h2>Watched movies</h2>
+    <h2>Monitored movies</h2>
     {% if movies %}
     <div class="movie-grid">
       {% for m in movies %}
       <div class="movie-card-wrap">
         <form method="post" action="{{ url_for('remove_movie', movie_id=m.id) }}" class="remove-control">
-          <button type="button" class="remove-confirm-btn">Remove from Watched?</button>
+          <button type="button" class="remove-confirm-btn">Remove from Monitored?</button>
           <button type="button" class="remove-btn" title="Remove">×</button>
         </form>
         <a class="movie-card" href="{{ url_for('movie_detail', movie_id=m.id) }}">
@@ -367,7 +472,7 @@
       {% endfor %}
     </div>
     {% else %}
-      <p class="empty">Nothing watched yet — search above to add a movie.</p>
+      <p class="empty">Nothing monitored yet — search above to add a movie.</p>
     {% endif %}
   </section>
 
@@ -500,7 +605,7 @@ document.addEventListener('click', (e) => {
 });
 
 // --- Remove-movie confirmation: clicking the × slides a "Remove from
-// Watched?" button out to its left instead of popping a native confirm(). ---
+// Monitored?" button out to its left instead of popping a native confirm(). ---
 document.querySelectorAll('.remove-control').forEach((control) => {
   const removeBtn = control.querySelector('.remove-btn');
   const confirmBtn = control.querySelector('.remove-confirm-btn');
@@ -558,6 +663,78 @@ settingsOverlay.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) settingsOverlay.classList.remove('open');
+});
+
+// --- TMDb API key show/hide toggle (hidden by default). ---
+const tmdbKeyInput = document.getElementById('tmdb_api_key');
+const tmdbKeyToggle = document.getElementById('tmdb-key-toggle');
+const tmdbKeyEyeSlash = document.getElementById('tmdb-key-eye-slash');
+
+tmdbKeyToggle.addEventListener('click', () => {
+  const showing = tmdbKeyInput.type === 'text';
+  tmdbKeyInput.type = showing ? 'password' : 'text';
+  tmdbKeyEyeSlash.style.display = showing ? 'none' : '';
+  tmdbKeyToggle.setAttribute('aria-pressed', String(!showing));
+  tmdbKeyToggle.setAttribute('aria-label', showing ? 'Show API key' : 'Hide API key');
+});
+
+// --- Global settings form: Save stays disabled until something changes,
+// same dirty-tracking pattern as the per-movie settings dialog. ---
+const globalSettingsForm = document.getElementById('global-settings-form');
+const globalSettingsApplyBtn = document.getElementById('global-settings-apply-btn');
+const globalSettingsFields = Array.from(globalSettingsForm.elements).filter(el => el.name);
+const globalSettingsInitial = new Map(
+  globalSettingsFields.map(el => [el, el.type === 'checkbox' ? el.checked : el.value])
+);
+
+function updateGlobalSettingsApplyState() {
+  const dirty = globalSettingsFields.some(el => {
+    const current = el.type === 'checkbox' ? el.checked : el.value;
+    return current !== globalSettingsInitial.get(el);
+  });
+  globalSettingsApplyBtn.disabled = !dirty;
+}
+
+for (const el of globalSettingsFields) {
+  el.addEventListener('input', updateGlobalSettingsApplyState);
+  el.addEventListener('change', updateGlobalSettingsApplyState);
+}
+
+// --- ntfy test button: probes whatever's currently typed in the field,
+// unsaved edits included, rather than the last-saved config.json value. ---
+const ntfyEndpointInput = document.getElementById('ntfy_endpoint');
+const ntfyTestBtn = document.getElementById('ntfy-test-btn');
+const ntfyTestStatus = document.getElementById('ntfy-test-status');
+
+ntfyTestBtn.addEventListener('click', async () => {
+  const endpoint = ntfyEndpointInput.value.trim();
+  ntfyTestStatus.className = 'setting-hint';
+  if (!endpoint) {
+    ntfyTestStatus.textContent = 'Enter an ntfy endpoint first.';
+    ntfyTestStatus.classList.add('error');
+    ntfyTestStatus.style.display = '';
+    return;
+  }
+  const btnDefaultText = ntfyTestBtn.textContent;
+  ntfyTestBtn.disabled = true;
+  ntfyTestBtn.textContent = 'Sending…';
+  ntfyTestStatus.style.display = 'none';
+  try {
+    const resp = await fetch('{{ url_for("test_notification") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ntfy_endpoint: endpoint }),
+    });
+    const data = await resp.json();
+    ntfyTestStatus.textContent = data.ok ? 'Test notification sent.' : (data.error || 'Could not send test notification.');
+    ntfyTestStatus.classList.add(data.ok ? 'success' : 'error');
+  } catch (e) {
+    ntfyTestStatus.textContent = 'Could not reach the server.';
+    ntfyTestStatus.classList.add('error');
+  }
+  ntfyTestStatus.style.display = '';
+  ntfyTestBtn.disabled = false;
+  ntfyTestBtn.textContent = btnDefaultText;
 });
 </script>
 </body>

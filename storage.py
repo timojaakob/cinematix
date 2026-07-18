@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared JSON storage for cinemacity-scraper: the watched-movie config and the
+Shared JSON storage for cinemacity-scraper: the monitored-movie config and the
 latest scrape results. Used by both scraper.py (writer of results, reader of
 config) and webui.py (writer of config, reader of results).
 """
@@ -36,6 +36,27 @@ DEFAULT_REQUIRED_FORMATS = ["IMAX"] if DEFAULT_REQUIRE_IMAX else []
 # movie is checked on every poll cycle unless the user slows it down.
 DEFAULT_CHECK_INTERVAL_SECONDS = 120
 
+# ntfy's own priority levels (https://docs.ntfy.sh/publish/#message-priority).
+NTFY_PRIORITY_OPTIONS = ["min", "low", "default", "high", "urgent"]
+
+# Global settings, editable at runtime via webui.py's settings dialog and
+# read fresh each poll cycle by scraper.py. tmdb_api_key/ntfy_endpoint start
+# blank here (not env-seeded) deliberately: TMDB_API_KEY only reaches the
+# web container and NTFY_TOPIC/NTFY_URL only reach the scraper container, so
+# whichever process ran the config migration first would otherwise "win"
+# with just its own half of the env vars. Instead each side falls back to
+# its own env var only at the point of use, when the stored value is empty
+# - see webui.py's get_tmdb_api_key() and scraper.py's notify() callers.
+DEFAULT_SETTINGS = {
+    "tmdb_api_key": "",
+    "ntfy_endpoint": "",
+    "notify_on_start": True,
+    "notify_on_start_priority": "low",
+    "notify_on_new_showtime": True,
+    "notify_on_new_showtime_priority": "urgent",
+    "default_check_interval_seconds": DEFAULT_CHECK_INTERVAL_SECONDS,
+}
+
 
 def _atomic_write(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,6 +91,7 @@ def _default_config() -> dict:
             }
             for q in DEFAULT_MOVIE_QUERIES
         ],
+        "settings": dict(DEFAULT_SETTINGS),
     }
 
 
@@ -116,6 +138,7 @@ def load_config() -> dict:
                 }
                 for q in queries
             ],
+            "settings": dict(DEFAULT_SETTINGS),
         }
         save_config(cfg)
         return cfg
@@ -126,7 +149,14 @@ def load_config() -> dict:
         if "required_formats" not in m:
             m["required_formats"] = list(legacy_required_formats)
             changed = True
-    cfg = {"movies": movies}
+
+    # Missing keys (config predating global settings, or one added since)
+    # are backfilled from defaults so callers never have to guard for them.
+    settings = {**DEFAULT_SETTINGS, **raw.get("settings", {})}
+    if settings != raw.get("settings"):
+        changed = True
+
+    cfg = {"movies": movies, "settings": settings}
     if changed:
         save_config(cfg)
     return cfg
@@ -162,6 +192,13 @@ def update_movie_settings(
             m["query"] = new_query.strip().lower()
             m["check_interval_seconds"] = check_interval_seconds
             m["required_formats"] = required_formats
+    save_config(cfg)
+    return cfg
+
+
+def update_settings(cfg: dict, updates: dict) -> dict:
+    cfg.setdefault("settings", dict(DEFAULT_SETTINGS))
+    cfg["settings"].update(updates)
     save_config(cfg)
     return cfg
 

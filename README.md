@@ -2,7 +2,7 @@
 
 Polls Cinema City's unofficial internal JSON feed for a given cinema and
 notifies (via [ntfy](https://ntfy.sh)) when a matching showtime becomes
-bookable. Built to watch for IMAX tickets at Cinema City Praha Flora — the
+bookable. Built to monitor for IMAX tickets at Cinema City Praha Flora — the
 only IMAX screen in Czechia — since high-demand releases there sell out
 within minutes of going on sale.
 
@@ -12,11 +12,11 @@ matching, non-sold-out showing appears. It does not automate purchases.
 Two processes share one image and one `/data` volume:
 
 - `scraper.py` — polls Cinema City on a loop, matches showtimes against your
-  watched movies, and sends one summary ntfy notification per poll cycle
+  monitored movies, and sends one summary ntfy notification per poll cycle
   when new matches appear (deep-linking to the web UI, not to a single
   showtime).
 - `webui.py` — a small local-only Flask app for searching [TMDb](https://www.themoviedb.org/)
-  to add movies to watch (poster/runtime/overview shown for each), and for
+  to add movies to monitor (poster/runtime/overview shown for each), and for
   each movie: which formats to check for (IMAX/3D/2D), how often, its
   Cinema City match text, and browsing its matching showtimes with
   clickable booking links.
@@ -51,25 +51,27 @@ Key findings baked into `scraper.py`:
 
 ## Configuration
 
-The watched movie list — including each movie's required formats, check
-frequency, and match text — lives in `/data/config.json`, managed through
-the web UI, not through env vars (except as one-time seed values, see
-below). Everything else is an environment variable:
+The monitored movie list — including each movie's required formats, check
+frequency, and match text — plus global settings (TMDb API key, ntfy
+endpoint, per-case notification toggles/priority, and the default check
+frequency for newly added movies) live in `/data/config.json`, all managed
+through the web UI, not through env vars (except as one-time seed values,
+see below). Everything else is an environment variable:
 
 | Variable | Default | Description |
 |---|---|---|
 | `CINEMA_ID` | `1052` | Cinema City venue ID (`1052` = Praha Flora) |
 | `SITE_ID` | `10101` | Country/site code (`10101` = CZ) |
 | `LANG_CODE` | `cs_CZ` | API response language |
-| `MOVIE_QUERY` | `dune` | Seeds `config.json`'s watch list *only* if it doesn't exist yet |
+| `MOVIE_QUERY` | `dune` | Seeds `config.json`'s monitored movie list *only* if it doesn't exist yet |
 | `REQUIRE_IMAX` | `true` | One-time seed only: if `true`, movies get "IMAX" as their default required format when first created; each movie's required formats are then edited per-movie in the web UI |
 | `DATE_RANGE_DAYS` | `21` | How many days ahead to poll |
 | `POLL_INTERVAL_SECONDS` | `120` | Delay between poll cycles |
-| `NTFY_TOPIC` | — | Your ntfy.sh topic (pick something unguessable — topics are public) |
-| `NTFY_URL` | `https://ntfy.sh/{NTFY_TOPIC}` | Override for a self-hosted ntfy instance |
+| `NTFY_TOPIC` | — | One-time seed only for the default ntfy endpoint (`https://ntfy.sh/{NTFY_TOPIC}`); pick something unguessable — topics are public. The live endpoint is set in the web UI's settings dialog |
+| `NTFY_URL` | `https://ntfy.sh/{NTFY_TOPIC}` | One-time seed override for a self-hosted ntfy instance; the live endpoint is set in the web UI's settings dialog |
 | `WEBUI_URL` | `https://cine.vfk.ovh` | Click-through link on ntfy notifications (point this at wherever the web UI is reachable) |
 | `STATE_FILE` | `/data/state.json` | Dedup state so repeat polls don't re-notify |
-| `TMDB_API_KEY` | — | Required by `webui.py` only, for movie search (free key from [themoviedb.org](https://www.themoviedb.org/settings/api)) |
+| `TMDB_API_KEY` | — | One-time seed only, used by `webui.py` for movie search (free key from [themoviedb.org](https://www.themoviedb.org/settings/api)); the live key is set in the web UI's settings dialog |
 | `DEBUG` | `false` | Verbose logging, including raw API payloads |
 
 ## Running
@@ -119,20 +121,28 @@ services:
   selected means the movie matches nothing** until you pick at least one.
   It's added with its poster/runtime/overview and a default match string
   (the lowercased TMDb title).
-- **Watched movies grid** — fixed-size cards showing poster, title, runtime,
+- **Monitored movies grid** — fixed-size cards showing poster, title, runtime,
   and release date. Clicking the × on a card slides out a "Remove from
-  Watched?" button in place rather than popping a native confirm dialog.
+  Monitored?" button in place rather than popping a native confirm dialog.
 - **Global settings** — a gear icon next to the title opens a settings
-  dialog; currently just a dark/light mode switch (defaults to your OS
-  preference, remembered after that via `localStorage`).
+  dialog: dark/light mode (defaults to your OS preference, remembered via
+  `localStorage`), the default check frequency for newly added movies, your
+  TMDb API key (masked by default, with a show/hide toggle), and
+  notifications — independent enable/disable and ntfy priority for each
+  case ("scraper started", "new showtime found"), an ntfy endpoint field,
+  and a **Test** button that sends a live test push to whatever's currently
+  typed there, even if unsaved.
 - **Per-movie settings** — a gear icon on each movie's page opens a dialog
   for its required formats (IMAX/3D/2D), check frequency (2 minutes to 1
-  day, or off), match text, and removing the movie from the watch list.
+  day, or off), match text, and removing the movie from the monitored list.
   Match text is editable because Cinema City listings are in Czech, so the
   auto-derived English title often won't match and needs manual tuning
-  once the film shows up on the site.
+  once the film shows up on the site. Saving any of these immediately
+  triggers a recheck of just that movie instead of waiting out its check
+  frequency.
 - **Movie detail page** — shows the TMDb rating alongside runtime/release
-  date, IMDb/TMDb links, and every currently matching showtime (format,
+  date, IMDb/TMDb links, a **Check now** button that forces an immediate
+  poll for just this movie, and every currently matching showtime (format,
   audio/subtitle language as a code next to a dub/captions icon,
   availability %, a working `Book` link), with filters built dynamically
   from whatever values actually appear in the results.

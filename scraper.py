@@ -8,7 +8,7 @@ ntfy notification when a matching, non-sold-out showing appears (IMAX-only
 by default). State (which events we've already notified about) is kept
 in a small JSON file so we don't spam on every poll.
 
-The watched movie list and IMAX requirement live in /data/config.json,
+The monitored movie list and IMAX requirement live in /data/config.json,
 editable at runtime via the companion webui.py without restarting this
 process (config is reloaded once per poll cycle). Every poll cycle also
 writes the full set of currently matching showtimes to /data/results.json
@@ -57,6 +57,8 @@ IMAX_AUDITORIUM_TINY_NAME = os.environ.get("IMAX_AUDITORIUM_TINY_NAME", "imax").
 IMAX_AUDITORIUM = os.environ.get("IMAX_AUDITORIUM", "").strip().lower()
 DATE_RANGE_DAYS = int(os.environ.get("DATE_RANGE_DAYS", "21"))
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "120"))
+# Fallback only: the live endpoint is normally storage's settings.ntfy_endpoint,
+# editable at runtime via webui.py's settings dialog (see notify()'s callers).
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "media-server-timo-8k3p")
 NTFY_URL = os.environ.get("NTFY_URL", f"https://ntfy.sh/{NTFY_TOPIC}")
 WEBUI_URL = os.environ.get("WEBUI_URL", "https://cine.vfk.ovh")
@@ -101,12 +103,15 @@ def save_state(state: dict) -> None:
 
 # --- ntfy ------------------------------------------------------------
 
-def notify(title: str, message: str, url: str = None, priority: str = "urgent") -> bool:
+def notify(
+    title: str, message: str, url: str = None, priority: str = "urgent", ntfy_endpoint: str | None = None
+) -> bool:
+    endpoint = ntfy_endpoint or NTFY_URL
     headers = {"Title": title, "Priority": priority, "Tags": "movie_camera,tickets"}
     if url:
         headers["Click"] = url
     try:
-        resp = requests.post(NTFY_URL, data=message.encode("utf-8"), headers=headers, timeout=10)
+        resp = requests.post(endpoint, data=message.encode("utf-8"), headers=headers, timeout=10)
         resp.raise_for_status()
         log.info("Notified: %s", title)
         return True
@@ -379,7 +384,7 @@ def run_once(state: dict) -> None:
 
         # Movies not due this cycle keep their previously fetched showtimes
         # instead of being wiped from results.json; movies removed from the
-        # watch list entirely (not in configured_ids) get dropped here.
+        # monitor list entirely (not in configured_ids) get dropped here.
         configured_ids = {m["id"] for m in config["movies"]}
         due_ids = {m["id"] for m in due_movies}
         previous_matches = storage.load_results().get("matches", [])
@@ -393,10 +398,23 @@ def run_once(state: dict) -> None:
 
         if new_matches:
             title, message = summarize_new_matches(new_matches)
-            # Only mark these as notified if the push actually went through, so a
-            # failed/rate-limited push gets retried next cycle instead of being
-            # silently dropped.
-            if notify(title, message, url=WEBUI_URL):
+            settings = config["settings"]
+            if settings.get("notify_on_new_showtime", True):
+                # Only mark these as notified if the push actually went through, so a
+                # failed/rate-limited push gets retried next cycle instead of being
+                # silently dropped.
+                pushed = notify(
+                    title,
+                    message,
+                    url=WEBUI_URL,
+                    priority=settings.get("notify_on_new_showtime_priority", "urgent"),
+                    ntfy_endpoint=settings.get("ntfy_endpoint") or None,
+                )
+                if pushed:
+                    state["notified_event_ids"].extend(m["event_id"] for m in new_matches)
+            else:
+                # This notification case is turned off - still mark these as
+                # notified so nothing floods through once it's turned back on.
                 state["notified_event_ids"].extend(m["event_id"] for m in new_matches)
 
         save_state(state)
@@ -436,12 +454,15 @@ def main() -> None:
         CINEMA_ID, titles, POLL_INTERVAL_SECONDS,
     )
     state = load_state()
-    notify(
-        "cinemacity-scraper started",
-        f"Watching for {', '.join(titles) or 'nothing yet'} at Praha Flora",
-        url=WEBUI_URL,
-        priority="low",
-    )
+    settings = config["settings"]
+    if settings.get("notify_on_start", True):
+        notify(
+            "cinemacity-scraper started",
+            f"Monitoring for {', '.join(titles) or 'nothing yet'} at Praha Flora",
+            url=WEBUI_URL,
+            priority=settings.get("notify_on_start_priority", "low"),
+            ntfy_endpoint=settings.get("ntfy_endpoint") or None,
+        )
 
     wake_event = threading.Event()
     threading.Thread(target=start_control_server, args=(wake_event,), daemon=True).start()

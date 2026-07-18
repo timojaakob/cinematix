@@ -165,7 +165,7 @@
 </style>
 </head>
 <body>
-  <a class="back" href="{{ url_for('index') }}">← Watched movies</a>
+  <a class="back" href="{{ url_for('index') }}">← Monitored movies</a>
 
   <section>
     <div class="header">
@@ -239,7 +239,7 @@
 
       <div class="modal-actions">
         <form method="post" action="{{ url_for('remove_movie', movie_id=movie.id) }}"
-              onsubmit="return confirm('Stop watching {{ movie.title }}?');">
+              onsubmit="return confirm('Stop monitoring {{ movie.title }}?');">
           <button type="submit" class="remove-movie-btn">Remove movie</button>
         </form>
         <button id="settings-apply-btn" type="submit" form="settings-form" disabled>Apply changes</button>

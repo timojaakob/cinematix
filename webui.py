@@ -2,7 +2,7 @@
 """
 Local-only web UI for cinemacity-scraper.
 
-Search TMDb to pick movies to watch (added to /data/config.json, picked up
+Search TMDb to pick movies to monitor (added to /data/config.json, picked up
 by scraper.py on its next poll cycle), and view each movie's matching
 showtimes (from /data/results.json) with clickable booking links. No auth —
 only bind this to a LAN-only port.
@@ -93,13 +93,33 @@ def relativedate(value: str | None) -> str:
     return humandate(value, with_time=True)
 
 
+def trigger_check(movie_id: str | None = None) -> None:
+    """Wakes the scraper's poll loop early and forces it to (re)check
+    movie_id this cycle regardless of its own check_interval_seconds - best
+    effort, since the scraper container may be temporarily unreachable."""
+    try:
+        requests.post(f"{SCRAPER_CONTROL_URL}/check-now", json={"movie_id": movie_id}, timeout=5)
+    except requests.RequestException:
+        pass
+
+
+def get_tmdb_api_key() -> str:
+    """Live value comes from the settings dialog (config.json); the
+    TMDB_API_KEY env var is only the one-time seed for a fresh config."""
+    return storage.load_config()["settings"].get("tmdb_api_key") or TMDB_API_KEY
+
+
+def sanitize_ntfy_priority(value: str, fallback: str) -> str:
+    return value if value in storage.NTFY_PRIORITY_OPTIONS else fallback
+
+
 def tmdb_search(query: str) -> list[dict]:
     if not query.strip():
         return []
     try:
         resp = requests.get(
             f"{TMDB_BASE}/search/movie",
-            params={"api_key": TMDB_API_KEY, "query": query, "include_adult": "false"},
+            params={"api_key": get_tmdb_api_key(), "query": query, "include_adult": "false"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -125,7 +145,7 @@ def tmdb_details(tmdb_id: int) -> dict | None:
     try:
         resp = requests.get(
             f"{TMDB_BASE}/movie/{tmdb_id}",
-            params={"api_key": TMDB_API_KEY},
+            params={"api_key": get_tmdb_api_key()},
             timeout=10,
         )
         resp.raise_for_status()
@@ -147,10 +167,17 @@ def tmdb_details(tmdb_id: int) -> dict | None:
 @app.route("/", methods=["GET"])
 def index():
     config = storage.load_config()
+    # Shown to the user as-is, including the TMDB_API_KEY env var fallback
+    # (see get_tmdb_api_key()) so the field reflects the key actually in use,
+    # not just what happens to be saved in config.json.
+    settings = {**config["settings"], "tmdb_api_key": config["settings"].get("tmdb_api_key") or TMDB_API_KEY}
     return render_template(
         "index.html",
         movies=config["movies"],
         all_formats=storage.FORMAT_OPTIONS,
+        settings=settings,
+        check_interval_options=CHECK_INTERVAL_OPTIONS,
+        ntfy_priority_options=storage.NTFY_PRIORITY_OPTIONS,
     )
 
 
@@ -170,6 +197,7 @@ def add_movie():
     if details is None:
         return jsonify({"error": "could not fetch movie details from TMDb"}), 502
 
+    config = storage.load_config()
     movie = {
         "id": f"tmdb-{tmdb_id}",
         "tmdb_id": tmdb_id,
@@ -182,11 +210,12 @@ def add_movie():
         "release_date": details["release_date"],
         "rating": details["rating"],
         "added_at": datetime.now().isoformat(timespec="seconds"),
-        "check_interval_seconds": storage.DEFAULT_CHECK_INTERVAL_SECONDS,
+        "check_interval_seconds": config["settings"].get(
+            "default_check_interval_seconds", storage.DEFAULT_CHECK_INTERVAL_SECONDS
+        ),
         "last_checked_at": None,
         "required_formats": sanitize_required_formats(body.get("required_formats") or []),
     }
-    config = storage.load_config()
     storage.add_movie(config, movie)
     return jsonify({"ok": True, "movie": movie})
 
@@ -243,7 +272,65 @@ def update_settings(movie_id):
     storage.update_movie_settings(
         config, movie_id, request.form.get("query", ""), check_interval_seconds, required_formats
     )
+    # Settings like required_formats change which showtimes match, so the
+    # existing results are now stale - force an immediate recheck instead of
+    # waiting out this movie's check_interval_seconds.
+    trigger_check(movie_id)
     return redirect(url_for("movie_detail", movie_id=movie_id))
+
+
+@app.route("/settings", methods=["POST"])
+def update_global_settings():
+    config = storage.load_config()
+
+    interval_raw = request.form.get("default_check_interval", "")
+    if interval_raw == "off":
+        default_check_interval_seconds = None
+    else:
+        try:
+            default_check_interval_seconds = int(interval_raw)
+        except ValueError:
+            default_check_interval_seconds = storage.DEFAULT_CHECK_INTERVAL_SECONDS
+
+    storage.update_settings(
+        config,
+        {
+            "tmdb_api_key": request.form.get("tmdb_api_key", "").strip(),
+            "ntfy_endpoint": request.form.get("ntfy_endpoint", "").strip(),
+            "notify_on_start": "notify_on_start" in request.form,
+            "notify_on_start_priority": sanitize_ntfy_priority(
+                request.form.get("notify_on_start_priority", ""), "low"
+            ),
+            "notify_on_new_showtime": "notify_on_new_showtime" in request.form,
+            "notify_on_new_showtime_priority": sanitize_ntfy_priority(
+                request.form.get("notify_on_new_showtime_priority", ""), "urgent"
+            ),
+            "default_check_interval_seconds": default_check_interval_seconds,
+        },
+    )
+    return redirect(url_for("index"))
+
+
+@app.route("/settings/test-notification", methods=["POST"])
+def test_notification():
+    """Sends a test push straight to whatever endpoint is currently in the
+    field, unsaved edits included - this is a live probe, not tied to
+    the saved config.json value."""
+    body = request.get_json(silent=True) or {}
+    endpoint = (body.get("ntfy_endpoint") or "").strip()
+    if not endpoint:
+        return jsonify({"ok": False, "error": "Enter an ntfy endpoint first."}), 400
+    try:
+        resp = requests.post(
+            endpoint,
+            data="This is a test notification from cinemacity-scraper.".encode("utf-8"),
+            headers={"Title": "Test notification", "Priority": "default", "Tags": "movie_camera,tickets"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    return jsonify({"ok": True})
 
 
 @app.route("/check-now", methods=["POST"])
