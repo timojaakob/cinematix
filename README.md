@@ -1,4 +1,4 @@
-# cinemacity-scraper
+# cinematix
 
 Polls Cinema City's unofficial internal JSON feed for a given cinema and
 notifies (via [ntfy](https://ntfy.sh)) when a matching showtime becomes
@@ -81,9 +81,9 @@ and needs a `TMDB_API_KEY`. They share the `/data` volume.
 
 ```yaml
 services:
-  cinemacity-scraper:
+  cinematix:
     build: .
-    container_name: cinemacity-scraper
+    container_name: cinematix
     restart: unless-stopped
     environment:
       - TZ=Europe/Prague
@@ -99,9 +99,9 @@ services:
     volumes:
       - ./data:/data
 
-  cinemacity-scraper-web:
+  cinematix-web:
     build: .
-    container_name: cinemacity-scraper-web
+    container_name: cinematix-web
     command: ["python", "-u", "webui.py"]
     restart: unless-stopped
     environment:
@@ -122,16 +122,19 @@ services:
   It's added with its poster/runtime/overview and a default match string
   (the lowercased TMDb title).
 - **Monitored movies grid** — fixed-size cards showing poster, title, runtime,
-  and release date. Clicking the × on a card slides out a "Remove from
+  release date, and a colored status dot summarizing that movie's current
+  showtimes at a glance (no matches yet, sold out, or low/fair/good
+  availability). Clicking the × on a card slides out a "Remove from
   Monitored?" button in place rather than popping a native confirm dialog.
 - **Global settings** — a gear icon next to the title opens a settings
   dialog: dark/light mode (defaults to your OS preference, remembered via
-  `localStorage`), the default check frequency for newly added movies, your
-  TMDb API key (masked by default, with a show/hide toggle), and
-  notifications — independent enable/disable and ntfy priority for each
-  case ("scraper started", "new showtime found"), an ntfy endpoint field,
-  and a **Test** button that sends a live test push to whatever's currently
-  typed there, even if unsaved.
+  `localStorage`), the default check frequency for newly added movies, the
+  default view (List/Calendar) for a movie's showtimes, your TMDb API key
+  (masked by default, with a show/hide toggle), and notifications —
+  independent enable/disable and ntfy priority for each case ("scraper
+  started", "new showtime found"), an ntfy endpoint field, and a **Test**
+  button that sends a live test push to whatever's currently typed there,
+  even if unsaved.
 - **Per-movie settings** — a gear icon on each movie's page opens a dialog
   for its required formats (IMAX/3D/2D), check frequency (2 minutes to 1
   day, or off), match text, and removing the movie from the monitored list.
@@ -144,8 +147,12 @@ services:
   date, IMDb/TMDb links, a **Check now** button that forces an immediate
   poll for just this movie, and every currently matching showtime (format,
   audio/subtitle language as a code next to a dub/captions icon,
-  availability %, a working `Book` link), with filters built dynamically
-  from whatever values actually appear in the results.
+  availability %, a working `Book` link), sortable by any column. A
+  **List/Calendar** toggle switches to a month grid color-coded by that
+  day's best availability, click a day for its agenda. Filters (hide low
+  availability, time range, weekdays, audio, format) are built dynamically
+  from whatever values actually appear in the results and apply to both
+  views.
 
 ## Limitations
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared JSON storage for cinemacity-scraper: the monitored-movie config and the
+Shared JSON storage for cinematix: the monitored-movie config and the
 latest scrape results. Used by both scraper.py (writer of results, reader of
 config) and webui.py (writer of config, reader of results).
 """
@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-log = logging.getLogger("cinemacity-scraper")
+log = logging.getLogger("cinematix")
 
 CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", "/data/config.json"))
 RESULTS_FILE = Path(os.environ.get("RESULTS_FILE", "/data/results.json"))
@@ -39,6 +39,8 @@ DEFAULT_CHECK_INTERVAL_SECONDS = 120
 # ntfy's own priority levels (https://docs.ntfy.sh/publish/#message-priority).
 NTFY_PRIORITY_OPTIONS = ["min", "low", "default", "high", "urgent"]
 
+VIEW_OPTIONS = ["list", "calendar"]
+
 # Global settings, editable at runtime via webui.py's settings dialog and
 # read fresh each poll cycle by scraper.py. tmdb_api_key/ntfy_endpoint start
 # blank here (not env-seeded) deliberately: TMDB_API_KEY only reaches the
@@ -55,6 +57,7 @@ DEFAULT_SETTINGS = {
     "notify_on_new_showtime": True,
     "notify_on_new_showtime_priority": "urgent",
     "default_check_interval_seconds": DEFAULT_CHECK_INTERVAL_SECONDS,
+    "default_view": "list",
 }
 
 

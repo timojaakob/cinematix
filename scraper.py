@@ -75,7 +75,7 @@ BASE_URL = (
 CINEMA_PAGE_URL = f"https://www.cinemacity.cz/cinemas/flora/{CINEMA_ID}"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) cinemacity-scraper/1.0",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) cinematix/1.0",
     "Accept": "application/json",
 }
 
@@ -83,7 +83,7 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
-log = logging.getLogger("cinemacity-scraper")
+log = logging.getLogger("cinematix")
 
 
 # --- State ---------------------------------------------------------------
@@ -353,6 +353,12 @@ def summarize_new_matches(new_matches: list[dict]) -> tuple[str, str]:
 
 
 CHECKING = threading.Event()
+# Movie ids actually included in the check cycle currently running - lets
+# /status report per-movie checking state instead of "is the scraper doing
+# *anything* right now", which used to make every movie's page show
+# "Checking..." whenever any other movie's cycle was running, including
+# ones with checking turned off entirely (see CHECKING_IDS reset below).
+CHECKING_IDS: set[str] = set()
 # Movie ids queued by webui.py's "Check now" button to force a check this
 # cycle even if their own check_interval_seconds says they're not due yet.
 FORCE_CHECK_LOCK = threading.Lock()
@@ -360,6 +366,7 @@ FORCE_CHECK_IDS: set[str] = set()
 
 
 def run_once(state: dict) -> None:
+    global CHECKING_IDS
     CHECKING.set()
     try:
         config = storage.load_config()
@@ -371,6 +378,7 @@ def run_once(state: dict) -> None:
         if not due_movies:
             log.debug("No movies due for a check this cycle (per-movie check_interval_seconds)")
             return
+        CHECKING_IDS = {m["id"] for m in due_movies}
 
         today = date.today()
         seen_auditoriums = set()
@@ -420,6 +428,7 @@ def run_once(state: dict) -> None:
         save_state(state)
     finally:
         CHECKING.clear()
+        CHECKING_IDS = set()
 
 
 def start_control_server(wake_event: threading.Event) -> None:
@@ -441,6 +450,9 @@ def start_control_server(wake_event: threading.Event) -> None:
 
     @control_app.route("/status", methods=["GET"])
     def control_status():
+        movie_id = request.args.get("movie_id")
+        if movie_id:
+            return {"checking": movie_id in CHECKING_IDS}
         return {"checking": CHECKING.is_set()}
 
     control_app.run(host="0.0.0.0", port=CONTROL_PORT)
@@ -450,14 +462,14 @@ def main() -> None:
     config = storage.load_config()
     titles = [m["title"] for m in config["movies"]]
     log.info(
-        "Starting cinemacity-scraper: cinema=%s movies=%r interval=%ss",
+        "Starting cinematix: cinema=%s movies=%r interval=%ss",
         CINEMA_ID, titles, POLL_INTERVAL_SECONDS,
     )
     state = load_state()
     settings = config["settings"]
     if settings.get("notify_on_start", True):
         notify(
-            "cinemacity-scraper started",
+            "cinematix started",
             f"Monitoring for {', '.join(titles) or 'nothing yet'} at Praha Flora",
             url=WEBUI_URL,
             priority=settings.get("notify_on_start_priority", "low"),

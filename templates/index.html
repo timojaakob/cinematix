@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-<title>cinemacity-scraper</title>
+<title>cinematix</title>
 <script>
 // Resolve the theme before first paint so there's no flash of the wrong
 // mode: an explicit choice from the settings switch wins, otherwise fall
@@ -19,45 +19,137 @@
 </script>
 <style>
   :root {
-    --bg: #111;
-    --text: #eee;
-    --text-secondary: #ccc;
-    --text-muted: #999;
-    --text-dim: #777;
-    --panel-bg: #1a1a1a;
-    --card-bg: #151515;
-    --border: #2a2a2a;
-    --input-bg: #0d0d0d;
-    --input-border: #333;
-    --hover-bg: #262626;
+    --bg: #14120f;
+    --text: #eeece8;
+    --text-secondary: #ccc8c0;
+    --text-muted: #9c968a;
+    --text-dim: #79736a;
+    --panel-bg: #1c1a16;
+    --card-bg: #181613;
+    --border: #2e2a24;
+    --input-bg: #100e0c;
+    --input-border: #3a352d;
+    --hover-bg: #2a2620;
     color-scheme: dark;
+
+    /* Brand accent: always exactly the logo color, unchanged between
+       themes - reserved for primary actions only (buttons, Book).
+       Near-black label text clears AA against it in both themes (6.6:1),
+       so on-accent doesn't need to vary either; only the hover shade
+       shifts, since a hover state has to differ from rest by definition.
+       Everything structural (links, hovers, selected states) lives on
+       --secondary/--link instead, orange's complement, so the accent
+       isn't spread thin across the whole UI. */
+    --accent: #f5821e;
+    --accent-hover: #e06e0a;
+    --accent-rgb: 245, 130, 30;
+    --on-accent: #211a10;
+
+    --secondary: #257e7b;
+    --secondary-hover: #2f9995;
+    --link: #4dcbc7;
+    --link-hover: #7fe0dc;
+
+    --avail: #7fbf7f;
+    --rating: #e0b040;
+    --on-rating: #211a10;
+    --danger: #e06a6a;
+    --danger-rgb: 224, 106, 106;
+    --warning: #d9a441;
+    --warning-bg: rgba(224, 176, 64, 0.12);
+    --warning-border: rgba(224, 176, 64, 0.35);
+
+    /* Bumps every rem-based size across the page in one place, rather than
+       hand-tuning dozens of individual font-size rules. */
+    font-size: 18px;
   }
   :root[data-theme="light"] {
-    --bg: #f4f4f5;
-    --text: #18181a;
-    --text-secondary: #3a3a3d;
-    --text-muted: #68686c;
-    --text-dim: #8a8a8e;
-    --panel-bg: #ffffff;
-    --card-bg: #fbfbfc;
-    --border: #e0e0e2;
+    --bg: #f7f5f1;
+    --text: #1c1a16;
+    --text-secondary: #3d392f;
+    --text-muted: #736d5f;
+    --text-dim: #948d7c;
+    --panel-bg: #fffefc;
+    --card-bg: #fbfaf7;
+    --border: #e6e1d8;
     --input-bg: #ffffff;
-    --input-border: #d4d4d7;
-    --hover-bg: #ececee;
+    --input-border: #d8d2c6;
+    --hover-bg: #efebe3;
     color-scheme: light;
+
+    /* --accent/--accent-hover/--accent-rgb/--on-accent aren't redefined
+       here - the brand color stays exactly --F5821E in both themes, so
+       there's nothing to override. A saturated color tuned to pop on a
+       dark ground looks flat reused on white, though, so the secondary
+       teal still gets its own light-mode value: one richer shade that
+       works as both link text and fill, rather than the darker,
+       duller-looking clone a naive per-theme darken would produce. */
+    --secondary: #1f7a77;
+    --secondary-hover: #185f5c;
+    --link: #1f7a77;
+    --link-hover: #185f5c;
+
+    --avail: #2f7d3f;
+    --danger: #b33a3a;
+    --danger-rgb: 179, 58, 58;
+    --warning: #8a6414;
+    --warning-bg: rgba(138, 100, 20, 0.10);
+    --warning-border: rgba(138, 100, 20, 0.35);
   }
+  /* Self-hosted (not a Google Fonts CDN link) so the app keeps working
+     fully offline/LAN-only - just the one weight the wordmark needs. */
+  @font-face {
+    font-family: 'Elms Sans';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('{{ url_for("static", filename="elms-sans-bold.woff2") }}') format('woff2');
+  }
+  html, body { height: 100%; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    max-width: 900px;
-    margin: 2rem auto;
-    padding: 0 1rem;
+    margin: 0;
     background: var(--bg);
     color: var(--text);
+    display: flex;
+    flex-direction: column;
+    /* The header lives outside the scrolling area (below) so its own width
+       is never affected by whether that area's content is tall enough to
+       need a scrollbar - otherwise the header's right edge would land in a
+       different place on a short page than on a tall one. */
+    overflow: hidden;
   }
-  .brand { display: flex; align-items: center; gap: 0.6rem; }
-  .brand img.logo { width: 36px; height: 36px; border-radius: 6px; }
+  /* Scrolls independently of .brand - see the .body overflow note above. */
+  .scroll-area {
+    flex: 1 1 auto;
+    overflow-y: auto;
+  }
+  .page {
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 1.75rem 2rem 3rem;
+    box-sizing: border-box;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 1rem 2rem;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+    box-sizing: border-box;
+    flex: 0 0 auto;
+  }
+  /* Baseline-aligned with the wordmark, then nudged down a couple px -
+     sitting exactly on the baseline reads as slightly too high next to
+     text, since a hard-edged square optically outweighs a letterform. */
+  .brand img.logo { width: 54px; height: 54px; border-radius: 6px; position: relative; top: 3px; }
   .brand .icon-btn { margin-left: auto; }
+  .brand-link { display: flex; align-items: baseline; gap: 0.6rem; color: inherit; text-decoration: none; }
   h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+  .brand h1 {
+    font-family: 'Elms Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 2.2rem;
+    margin: 0;
+  }
   .subtitle { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
   section {
     background: var(--panel-bg);
@@ -68,22 +160,36 @@
   }
   h2 { font-size: 1rem; margin-top: 0; color: var(--text-secondary); }
   button {
-    background: #3b6ea5;
-    color: white;
+    background: var(--accent);
+    color: var(--on-accent);
     border: none;
     border-radius: 6px;
     padding: 0.4rem 1rem;
     font-size: 0.85rem;
     cursor: pointer;
   }
-  button:hover { background: #4a80bb; }
+  /* :where() keeps this at zero specificity, so every other button variant's
+     own :hover rule (remove-btn, modal-close, search-clear, ...) naturally
+     wins without needing a growing list of :not() exclusions here. */
+  :where(button):hover { background: var(--accent-hover); }
+  /* Only the actual filled accent buttons get the tinted lift in light
+     mode - listed explicitly rather than "every button except X" so a
+     non-accent button can never inherit an orange glow it didn't ask for. */
+  :root[data-theme="light"] #add-movie-confirm-btn:not(:disabled),
+  :root[data-theme="light"] #ntfy-test-btn:not(:disabled),
+  :root[data-theme="light"] #global-settings-apply-btn:not(:disabled) {
+    box-shadow: 0 6px 16px -4px rgba(var(--accent-rgb), 0.45);
+  }
   .icon-btn {
     display: inline-flex; align-items: center; justify-content: center;
     background: transparent; color: var(--text-muted); border: 1px solid var(--input-border);
     border-radius: 6px; padding: 0.4rem; cursor: pointer; flex-shrink: 0;
   }
   .icon-btn svg { width: 17px; height: 17px; }
-  .icon-btn:hover { border-color: #3b6ea5; color: var(--text); }
+  .icon-btn:hover { background: transparent; border-color: var(--secondary); color: var(--text); }
+  /* Matches movie.html's settings gear, which inherits the brighter
+     text-secondary from that page's filters/view-toggle .icon-btn base. */
+  #global-settings-btn { color: var(--text-secondary); }
 
   /* search */
   .search-wrap { position: relative; }
@@ -106,6 +212,22 @@
     border-radius: 6px;
     padding: 0.6rem 0.75rem 0.6rem 2.25rem;
     font-size: 0.95rem;
+  }
+  #movie-search { padding-right: 2.25rem; }
+  .search-clear {
+    display: none; position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
+    align-items: center; justify-content: center; background: transparent; border: none;
+    color: var(--text-muted); cursor: pointer; padding: 0.3rem; border-radius: 50%; line-height: 1; font-size: 0.95rem;
+  }
+  .search-clear.visible { display: flex; }
+  .search-clear:hover { color: var(--text); background: var(--hover-bg); }
+  .search-row .already-tag {
+    margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 0.68rem; color: var(--text-dim);
+    border: 1px solid var(--input-border); border-radius: 4px; padding: 0.1rem 0.4rem;
+  }
+  .dialog-warning {
+    font-size: 0.78rem; color: var(--warning); background: var(--warning-bg);
+    border: 1px solid var(--warning-border); border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 0.75rem;
   }
   #search-dropdown {
     position: absolute;
@@ -140,11 +262,16 @@
   /* movie grid */
   .movie-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, 210px);
+    grid-template-columns: repeat(auto-fill, minmax(170px, 230px));
     justify-content: start;
-    gap: 1rem;
+    gap: 1.25rem;
   }
-  .movie-card-wrap { position: relative; width: 210px; }
+  .movie-card-wrap { position: relative; }
+  @keyframes cc-added-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
+    20% { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.55); }
+  }
+  .movie-card-wrap.just-added { border-radius: 8px; animation: cc-added-pulse 1.4s ease-out 1; }
   .movie-card {
     display: block;
     background: var(--card-bg);
@@ -154,7 +281,7 @@
     text-decoration: none;
     color: inherit;
   }
-  .movie-card:hover { border-color: #3b6ea5; }
+  .movie-card:hover { border-color: var(--secondary); }
   .movie-card .poster {
     width: 100%;
     aspect-ratio: 2 / 3;
@@ -196,6 +323,14 @@
     text-overflow: ellipsis;
   }
   .movie-card .runtime { margin-bottom: 0.15rem; }
+  .card-status {
+    display: flex; align-items: center; gap: 0.35rem;
+    font-size: 0.72rem; color: var(--text-muted); margin-top: 0.4rem;
+  }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-dim); }
+  .status-dot.good { background: var(--avail); }
+  .status-dot.fair { background: var(--rating); }
+  .status-dot.low, .status-dot.sold-out { background: var(--danger); }
   .remove-control {
     position: absolute;
     top: 6px;
@@ -228,6 +363,7 @@
     padding: 0 0.6rem;
     opacity: 1;
   }
+  .remove-confirm-btn:hover { background: #c94a4a; }
   .remove-btn {
     flex-shrink: 0;
     width: 22px;
@@ -277,7 +413,7 @@
     display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);
     cursor: pointer; border: 1px solid var(--input-border); border-radius: 5px; padding: 0.2rem 0.5rem;
   }
-  label.day-toggle:has(input:checked) { border-color: #3b6ea5; color: var(--text); }
+  label.day-toggle:has(input:checked) { border-color: var(--secondary); color: var(--text); }
   .setting-row select,
   .setting-row input[type="text"],
   .setting-row input[type="password"] {
@@ -295,8 +431,8 @@
   .input-with-toggle input { flex: 1; min-width: 0; }
   .input-with-toggle button { flex-shrink: 0; }
   .icon-btn.icon-only { padding: 0.4rem; flex-shrink: 0; }
-  .setting-hint.error { color: #e06a6a; }
-  .setting-hint.success { color: #7fbf7f; }
+  .setting-hint.error { color: var(--danger); }
+  .setting-hint.success { color: var(--avail); }
   .icon-btn.icon-only svg { width: 16px; height: 16px; }
   button:disabled, button:disabled:hover { background: #555; cursor: default; }
 
@@ -311,107 +447,31 @@
     position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
     background: var(--panel-bg); transition: transform 0.2s ease;
   }
-  .theme-switch input:checked + .theme-switch-track { background: #3b6ea5; }
+  .theme-switch input:checked + .theme-switch-track { background: var(--secondary); }
   .theme-switch input:checked + .theme-switch-track .theme-switch-thumb { transform: translateX(18px); }
 </style>
 </head>
 <body>
   <div class="brand">
-    <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
-    <h1>cinemacity-scraper</h1>
-    <button id="settings-btn" type="button" class="icon-btn" aria-label="Settings" aria-haspopup="dialog" aria-controls="settings-overlay">
+    <a class="brand-link" href="{{ url_for('index') }}">
+      <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
+      <h1>cinematix</h1>
+    </a>
+    <button id="global-settings-btn" type="button" class="icon-btn" aria-label="Settings" aria-haspopup="dialog" aria-controls="global-settings-overlay">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="3"></circle>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 13.09H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        <line x1="4" y1="6" x2="20" y2="6"></line>
+        <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"></circle>
+        <line x1="4" y1="12" x2="20" y2="12"></line>
+        <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"></circle>
+        <line x1="4" y1="18" x2="20" y2="18"></line>
+        <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"></circle>
       </svg>
     </button>
   </div>
-  <p class="subtitle">Praha Flora</p>
 
-  <div id="settings-overlay" class="modal-overlay">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <div class="modal-header">
-        <h2 id="settings-title">Settings</h2>
-        <button id="settings-close-btn" type="button" class="modal-close" aria-label="Close">✕</button>
-      </div>
-      <div class="setting-row">
-        <label>Appearance</label>
-        <label class="theme-switch">
-          <input type="checkbox" id="theme-switch-input">
-          <span class="theme-switch-track"><span class="theme-switch-thumb"></span></span>
-          <span id="theme-switch-label">Dark mode</span>
-        </label>
-      </div>
+  {% include "_global_settings_modal.html" %}
 
-      <form id="global-settings-form" method="post" action="{{ url_for('update_global_settings') }}">
-        <div class="setting-row">
-          <label for="default_check_interval">Default check frequency</label>
-          <select id="default_check_interval" name="default_check_interval">
-            {% for seconds, label in check_interval_options %}
-            <option value="{{ seconds }}" {% if settings.default_check_interval_seconds == seconds %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-            <option value="off" {% if settings.default_check_interval_seconds is none %}selected{% endif %}>Off</option>
-          </select>
-          <p class="setting-hint">Used for newly added movies — each one can still be changed individually.</p>
-        </div>
-
-        <div class="setting-row">
-          <label>Notifications</label>
-          <div class="setting-group">
-            <div class="notify-case">
-              <label class="checkbox">
-                <input type="checkbox" name="notify_on_start" {% if settings.notify_on_start %}checked{% endif %}>
-                Scraper started
-              </label>
-              <select name="notify_on_start_priority">
-                {% for p in ntfy_priority_options %}
-                <option value="{{ p }}" {% if settings.notify_on_start_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="notify-case">
-              <label class="checkbox">
-                <input type="checkbox" name="notify_on_new_showtime" {% if settings.notify_on_new_showtime %}checked{% endif %}>
-                New showtime found
-              </label>
-              <select name="notify_on_new_showtime_priority">
-                {% for p in ntfy_priority_options %}
-                <option value="{{ p }}" {% if settings.notify_on_new_showtime_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <label for="ntfy_endpoint">ntfy endpoint</label>
-          <div class="input-with-toggle">
-            <input type="text" id="ntfy_endpoint" name="ntfy_endpoint" value="{{ settings.ntfy_endpoint }}" placeholder="https://ntfy.sh/your-topic" autocomplete="off" spellcheck="false">
-            <button type="button" id="ntfy-test-btn">Test</button>
-          </div>
-          <p id="ntfy-test-status" class="setting-hint" style="display:none;"></p>
-        </div>
-
-        <div class="setting-row">
-          <label for="tmdb_api_key">TMDb API key</label>
-          <div class="input-with-toggle">
-            <input type="password" id="tmdb_api_key" name="tmdb_api_key" value="{{ settings.tmdb_api_key }}" autocomplete="off" spellcheck="false">
-            <button type="button" id="tmdb-key-toggle" class="icon-btn icon-only" aria-label="Show API key" aria-pressed="false">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-                <line id="tmdb-key-eye-slash" x1="2" y1="2" x2="22" y2="22" style="display:none"></line>
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button id="global-settings-apply-btn" type="submit" disabled>Save</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  <div class="scroll-area"><div class="page">
 
   <section>
     <h2>Search movies</h2>
@@ -421,6 +481,7 @@
         <path d="m21 21-4.3-4.3"></path>
       </svg>
       <input type="text" id="movie-search" placeholder="Search for a movie…" autocomplete="off">
+      <button type="button" id="search-clear" class="search-clear" aria-label="Clear search">✕</button>
       <div id="search-dropdown"></div>
     </div>
   </section>
@@ -431,6 +492,7 @@
         <h2 id="add-movie-title">Add movie</h2>
         <button id="add-movie-close-btn" type="button" class="modal-close" aria-label="Cancel">✕</button>
       </div>
+      <p id="add-movie-warning" class="dialog-warning" style="display:none;"></p>
       <div class="setting-row">
         <label>Formats to check</label>
         <div id="add-movie-formats" class="format-checkboxes">
@@ -440,6 +502,7 @@
         </div>
       </div>
       <p class="setting-hint">No formats selected means no showtimes will match.</p>
+      <p id="add-movie-error" class="setting-hint error" style="display:none;"></p>
       <div class="modal-actions">
         <button id="add-movie-confirm-btn" type="button">Add movie</button>
       </div>
@@ -451,10 +514,10 @@
     {% if movies %}
     <div class="movie-grid">
       {% for m in movies %}
-      <div class="movie-card-wrap">
+      <div class="movie-card-wrap" data-movie-id="{{ m.id }}">
         <form method="post" action="{{ url_for('remove_movie', movie_id=m.id) }}" class="remove-control">
           <button type="button" class="remove-confirm-btn">Remove from Monitored?</button>
-          <button type="button" class="remove-btn" title="Remove">×</button>
+          <button type="button" class="remove-btn" title="Remove" aria-label="Remove {{ m.title }} from monitored movies">×</button>
         </form>
         <a class="movie-card" href="{{ url_for('movie_detail', movie_id=m.id) }}">
           {% if m.poster_url %}
@@ -466,6 +529,16 @@
             <div class="title">{{ m.title }}</div>
             {% if m.runtime %}<div class="runtime">{{ m.runtime }} min</div>{% endif %}
             {% if m.release_date %}<div class="release-date">{{ m.release_date | humandate(with_time=False) }}</div>{% endif %}
+            <div class="card-status">
+              <span class="status-dot {{ m.status_tier }}"></span>
+              {% if m.showtime_count == 0 %}
+                Nothing yet
+              {% elif m.status_tier == 'sold-out' %}
+                Sold out
+              {% else %}
+                {{ m.showtime_count }} showtime{{ 's' if m.showtime_count != 1 else '' }}
+              {% endif %}
+            </div>
           </div>
         </a>
       </div>
@@ -476,28 +549,46 @@
     {% endif %}
   </section>
 
+  </div></div>
+
 <script>
 const searchInput = document.getElementById('movie-search');
+const searchClearBtn = document.getElementById('search-clear');
 const dropdown = document.getElementById('search-dropdown');
 let debounceTimer = null;
 let currentResults = [];
 let activeIndex = -1;
 
+// Movies already being monitored (by TMDb id), so the search dropdown and
+// add-movie dialog can flag a re-add before it happens - re-adding silently
+// resets that movie's check interval, formats, and history (storage.add_movie
+// overwrites by id).
+const EXISTING_TMDB_IDS = new Set({{ existing_tmdb_ids | tojson }});
+
 // --- Add-movie dialog: opened when a search result is picked, lets the
 // user choose which formats to check for before the movie is actually
-// added (empty selection = no formats wanted, so it won't match anything
-// until the user picks at least one). ---
+// added. Formats default to all-checked, since leaving them unchecked
+// means the movie will silently never match any showtimes. ---
 const addMovieOverlay = document.getElementById('add-movie-overlay');
 const addMovieTitle = document.getElementById('add-movie-title');
+const addMovieWarning = document.getElementById('add-movie-warning');
 const addMovieCloseBtn = document.getElementById('add-movie-close-btn');
 const addMovieConfirmBtn = document.getElementById('add-movie-confirm-btn');
+const addMovieError = document.getElementById('add-movie-error');
 const addMovieFormatCheckboxes = Array.from(document.querySelectorAll('.add-movie-format'));
 let pendingMovie = null;
 
 function openAddDialog(result) {
   pendingMovie = result;
   addMovieTitle.textContent = result.year ? `${result.title} (${result.year})` : result.title;
-  for (const cb of addMovieFormatCheckboxes) cb.checked = false;
+  for (const cb of addMovieFormatCheckboxes) cb.checked = true;
+  addMovieError.style.display = 'none';
+  const alreadyAdded = EXISTING_TMDB_IDS.has(result.tmdb_id);
+  addMovieWarning.textContent = alreadyAdded
+    ? "You're already monitoring this movie - continuing will reset its check frequency, formats, and history to the values below."
+    : '';
+  addMovieWarning.style.display = alreadyAdded ? '' : 'none';
+  addMovieConfirmBtn.textContent = alreadyAdded ? 'Update movie' : 'Add movie';
   dropdown.classList.remove('open');
   addMovieOverlay.classList.add('open');
 }
@@ -542,7 +633,8 @@ function renderResults(results) {
       const thumb = r.poster_thumb
         ? `<img src="${r.poster_thumb}" alt="">`
         : `<div class="thumb-placeholder"></div>`;
-      row.innerHTML = `${thumb}<div class="meta"><div class="title">${r.title}</div><div class="year">${r.year || ''}</div></div>`;
+      const alreadyTag = EXISTING_TMDB_IDS.has(r.tmdb_id) ? '<span class="already-tag">Monitored</span>' : '';
+      row.innerHTML = `${thumb}<div class="meta"><div class="title">${r.title}</div><div class="year">${r.year || ''}</div></div>${alreadyTag}`;
       row.addEventListener('click', () => openAddDialog(r));
       dropdown.appendChild(row);
     }
@@ -550,20 +642,46 @@ function renderResults(results) {
   dropdown.classList.add('open');
 }
 
+function renderSearchError() {
+  currentResults = [];
+  activeIndex = -1;
+  dropdown.innerHTML = '<div class="search-empty">Search failed — check the TMDb API key in Settings and try again.</div>';
+  dropdown.classList.add('open');
+}
+
 async function addMovie(tmdbId, requiredFormats) {
-  const resp = await fetch('{{ url_for("add_movie") }}', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tmdb_id: tmdbId, required_formats: requiredFormats }),
-  });
+  addMovieError.style.display = 'none';
+  let resp;
+  try {
+    resp = await fetch('{{ url_for("add_movie") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdb_id: tmdbId, required_formats: requiredFormats }),
+    });
+  } catch (e) {
+    addMovieError.textContent = 'Could not reach the server.';
+    addMovieError.style.display = '';
+    return;
+  }
   if (resp.ok) {
+    const data = await resp.json();
+    try {
+      sessionStorage.setItem('cc-just-added', data.movie.id);
+    } catch (e) { /* storage unavailable (private mode, quota, ...) */ }
     window.location.reload();
   } else {
-    alert('Could not add movie.');
+    const data = await resp.json().catch(() => ({}));
+    addMovieError.textContent = data.error || 'Could not add movie.';
+    addMovieError.style.display = '';
   }
 }
 
+function updateSearchClearVisibility() {
+  searchClearBtn.classList.toggle('visible', searchInput.value.length > 0);
+}
+
 searchInput.addEventListener('input', () => {
+  updateSearchClearVisibility();
   clearTimeout(debounceTimer);
   const q = searchInput.value.trim();
   if (!q) {
@@ -571,10 +689,22 @@ searchInput.addEventListener('input', () => {
     return;
   }
   debounceTimer = setTimeout(async () => {
-    const resp = await fetch('{{ url_for("api_search") }}?q=' + encodeURIComponent(q));
-    const results = await resp.json();
-    renderResults(results);
+    try {
+      const resp = await fetch('{{ url_for("api_search") }}?q=' + encodeURIComponent(q));
+      if (!resp.ok) throw new Error('search request failed');
+      const results = await resp.json();
+      renderResults(results);
+    } catch (e) {
+      renderSearchError();
+    }
   }, 300);
+});
+
+searchClearBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  updateSearchClearVisibility();
+  dropdown.classList.remove('open');
+  searchInput.focus();
 });
 
 searchInput.addEventListener('keydown', (e) => {
@@ -631,111 +761,26 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// --- Settings modal + theme switch. The theme itself was already applied
-// pre-paint by the inline script in <head>; this just syncs the switch to
-// match and persists explicit choices for every page to pick up. ---
-const THEME_KEY = 'cinemacity-theme';
-const themeInput = document.getElementById('theme-switch-input');
-const themeLabel = document.getElementById('theme-switch-label');
-
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  themeInput.checked = theme === 'light';
-  themeLabel.textContent = theme === 'light' ? 'Light mode' : 'Dark mode';
-}
-
-applyTheme(document.documentElement.dataset.theme || 'dark');
-
-themeInput.addEventListener('change', () => {
-  const theme = themeInput.checked ? 'light' : 'dark';
-  localStorage.setItem(THEME_KEY, theme);
-  applyTheme(theme);
-});
-
-const settingsBtn = document.getElementById('settings-btn');
-const settingsOverlay = document.getElementById('settings-overlay');
-const settingsCloseBtn = document.getElementById('settings-close-btn');
-
-settingsBtn.addEventListener('click', () => settingsOverlay.classList.add('open'));
-settingsCloseBtn.addEventListener('click', () => settingsOverlay.classList.remove('open'));
-settingsOverlay.addEventListener('click', (e) => {
-  if (e.target === settingsOverlay) settingsOverlay.classList.remove('open');
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) settingsOverlay.classList.remove('open');
-});
-
-// --- TMDb API key show/hide toggle (hidden by default). ---
-const tmdbKeyInput = document.getElementById('tmdb_api_key');
-const tmdbKeyToggle = document.getElementById('tmdb-key-toggle');
-const tmdbKeyEyeSlash = document.getElementById('tmdb-key-eye-slash');
-
-tmdbKeyToggle.addEventListener('click', () => {
-  const showing = tmdbKeyInput.type === 'text';
-  tmdbKeyInput.type = showing ? 'password' : 'text';
-  tmdbKeyEyeSlash.style.display = showing ? 'none' : '';
-  tmdbKeyToggle.setAttribute('aria-pressed', String(!showing));
-  tmdbKeyToggle.setAttribute('aria-label', showing ? 'Show API key' : 'Hide API key');
-});
-
-// --- Global settings form: Save stays disabled until something changes,
-// same dirty-tracking pattern as the per-movie settings dialog. ---
-const globalSettingsForm = document.getElementById('global-settings-form');
-const globalSettingsApplyBtn = document.getElementById('global-settings-apply-btn');
-const globalSettingsFields = Array.from(globalSettingsForm.elements).filter(el => el.name);
-const globalSettingsInitial = new Map(
-  globalSettingsFields.map(el => [el, el.type === 'checkbox' ? el.checked : el.value])
-);
-
-function updateGlobalSettingsApplyState() {
-  const dirty = globalSettingsFields.some(el => {
-    const current = el.type === 'checkbox' ? el.checked : el.value;
-    return current !== globalSettingsInitial.get(el);
-  });
-  globalSettingsApplyBtn.disabled = !dirty;
-}
-
-for (const el of globalSettingsFields) {
-  el.addEventListener('input', updateGlobalSettingsApplyState);
-  el.addEventListener('change', updateGlobalSettingsApplyState);
-}
-
-// --- ntfy test button: probes whatever's currently typed in the field,
-// unsaved edits included, rather than the last-saved config.json value. ---
-const ntfyEndpointInput = document.getElementById('ntfy_endpoint');
-const ntfyTestBtn = document.getElementById('ntfy-test-btn');
-const ntfyTestStatus = document.getElementById('ntfy-test-status');
-
-ntfyTestBtn.addEventListener('click', async () => {
-  const endpoint = ntfyEndpointInput.value.trim();
-  ntfyTestStatus.className = 'setting-hint';
-  if (!endpoint) {
-    ntfyTestStatus.textContent = 'Enter an ntfy endpoint first.';
-    ntfyTestStatus.classList.add('error');
-    ntfyTestStatus.style.display = '';
+// --- Acknowledge a just-added movie with a brief highlight instead of a
+// blocking toast: addMovie() stashes the new id before reloading, so it
+// survives the full-page reload that add currently does. ---
+(function highlightJustAdded() {
+  let justAddedId;
+  try {
+    justAddedId = sessionStorage.getItem('cc-just-added');
+    sessionStorage.removeItem('cc-just-added');
+  } catch (e) {
     return;
   }
-  const btnDefaultText = ntfyTestBtn.textContent;
-  ntfyTestBtn.disabled = true;
-  ntfyTestBtn.textContent = 'Sending…';
-  ntfyTestStatus.style.display = 'none';
-  try {
-    const resp = await fetch('{{ url_for("test_notification") }}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ntfy_endpoint: endpoint }),
-    });
-    const data = await resp.json();
-    ntfyTestStatus.textContent = data.ok ? 'Test notification sent.' : (data.error || 'Could not send test notification.');
-    ntfyTestStatus.classList.add(data.ok ? 'success' : 'error');
-  } catch (e) {
-    ntfyTestStatus.textContent = 'Could not reach the server.';
-    ntfyTestStatus.classList.add('error');
-  }
-  ntfyTestStatus.style.display = '';
-  ntfyTestBtn.disabled = false;
-  ntfyTestBtn.textContent = btnDefaultText;
-});
+  if (!justAddedId) return;
+  const card = document.querySelector(`.movie-card-wrap[data-movie-id="${CSS.escape(justAddedId)}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  card.classList.add('just-added');
+  card.addEventListener('animationend', () => card.classList.remove('just-added'), { once: true });
+})();
 </script>
+
+{% include "_global_settings_script.html" %}
 </body>
 </html>

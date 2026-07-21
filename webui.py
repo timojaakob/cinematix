@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Local-only web UI for cinemacity-scraper.
+Local-only web UI for cinematix.
 
 Search TMDb to pick movies to monitor (added to /data/config.json, picked up
 by scraper.py on its next poll cycle), and view each movie's matching
@@ -19,7 +19,7 @@ import storage
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMG_BASE = "https://image.tmdb.org/t/p"
-SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://cinemacity-scraper:5001")
+SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://cinematix:5001")
 
 # (seconds, label) options for the per-movie check-frequency dropdown.
 CHECK_INTERVAL_OPTIONS = [
@@ -113,6 +113,25 @@ def sanitize_ntfy_priority(value: str, fallback: str) -> str:
     return value if value in storage.NTFY_PRIORITY_OPTIONS else fallback
 
 
+def sanitize_default_view(value: str, fallback: str) -> str:
+    return value if value in storage.VIEW_OPTIONS else fallback
+
+
+def card_status_tier(showtime_count: int, best_availability: float | None) -> str:
+    """Buckets a movie's current showtimes into a coarse status for the
+    monitored-movies grid, echoing the calendar view's red/amber/green
+    read without needing to duplicate its HSL gradient math server-side."""
+    if showtime_count == 0:
+        return "none"
+    if best_availability is None:
+        return "sold-out"
+    if best_availability >= 0.5:
+        return "good"
+    if best_availability >= 0.15:
+        return "fair"
+    return "low"
+
+
 def tmdb_search(query: str) -> list[dict]:
     if not query.strip():
         return []
@@ -171,13 +190,36 @@ def index():
     # (see get_tmdb_api_key()) so the field reflects the key actually in use,
     # not just what happens to be saved in config.json.
     settings = {**config["settings"], "tmdb_api_key": config["settings"].get("tmdb_api_key") or TMDB_API_KEY}
+
+    matches_by_movie: dict[str, list[dict]] = {}
+    for m in storage.load_results()["matches"]:
+        matches_by_movie.setdefault(m["movie_id"], []).append(m)
+
+    movies = []
+    for movie in config["movies"]:
+        movie_matches = matches_by_movie.get(movie["id"], [])
+        open_matches = [m for m in movie_matches if not m.get("sold_out") and m.get("availability") is not None]
+        best_availability = max((m["availability"] for m in open_matches), default=None)
+        showtime_count = len(movie_matches)
+        movies.append(
+            {
+                **movie,
+                "showtime_count": showtime_count,
+                "status_tier": card_status_tier(showtime_count, best_availability),
+            }
+        )
+
     return render_template(
         "index.html",
-        movies=config["movies"],
+        movies=movies,
         all_formats=storage.FORMAT_OPTIONS,
         settings=settings,
         check_interval_options=CHECK_INTERVAL_OPTIONS,
         ntfy_priority_options=storage.NTFY_PRIORITY_OPTIONS,
+        # Lets the search dropdown flag results already being monitored,
+        # since re-adding one silently resets its check interval/formats/
+        # history (storage.add_movie() overwrites by id) - see movie-search.
+        existing_tmdb_ids=[m["tmdb_id"] for m in config["movies"] if m.get("tmdb_id")],
     )
 
 
@@ -238,6 +280,10 @@ def movie_detail(movie_id):
     matches = [m for m in results["matches"] if m["movie_id"] == movie_id]
     audio_languages = sorted({m.get("audio_language") or "Unknown" for m in matches})
     format_options = sorted({m.get("format") or "Unknown" for m in matches})
+    # Shown to the user as-is, including the TMDB_API_KEY env var fallback
+    # (see get_tmdb_api_key()) so the field reflects the key actually in use,
+    # not just what happens to be saved in config.json.
+    settings = {**config["settings"], "tmdb_api_key": config["settings"].get("tmdb_api_key") or TMDB_API_KEY}
     return render_template(
         "movie.html",
         movie=movie,
@@ -250,13 +296,16 @@ def movie_detail(movie_id):
         # doesn't necessarily mean *this* movie was just refreshed.
         updated_at=movie.get("last_checked_at"),
         check_interval_options=CHECK_INTERVAL_OPTIONS,
+        settings=settings,
+        ntfy_priority_options=storage.NTFY_PRIORITY_OPTIONS,
     )
 
 
 @app.route("/movies/<movie_id>/settings", methods=["POST"])
 def update_settings(movie_id):
     config = storage.load_config()
-    if not any(m["id"] == movie_id for m in config["movies"]):
+    movie = next((m for m in config["movies"] if m["id"] == movie_id), None)
+    if movie is None:
         abort(404)
 
     interval_raw = request.form.get("check_interval", "")
@@ -269,13 +318,31 @@ def update_settings(movie_id):
             check_interval_seconds = storage.DEFAULT_CHECK_INTERVAL_SECONDS
 
     required_formats = sanitize_required_formats(request.form.getlist("required_formats"))
+    new_query = request.form.get("query", "").strip().lower()
+
+    previous_interval = movie.get("check_interval_seconds")
+    # None means "off", effectively an infinite interval, so turning
+    # checking on at all counts as an increase too.
+    frequency_increased = check_interval_seconds is not None and (
+        previous_interval is None or check_interval_seconds < previous_interval
+    )
+    results_now_stale = (
+        required_formats != movie.get("required_formats", [])
+        or new_query != movie.get("query", "")
+    )
+
     storage.update_movie_settings(
         config, movie_id, request.form.get("query", ""), check_interval_seconds, required_formats
     )
-    # Settings like required_formats change which showtimes match, so the
-    # existing results are now stale - force an immediate recheck instead of
-    # waiting out this movie's check_interval_seconds.
-    trigger_check(movie_id)
+    # A shorter interval means the user wants fresher data sooner, and a
+    # query/required_formats change makes the existing results stale either
+    # way - both are worth an immediate recheck instead of waiting out the
+    # new check_interval_seconds. A longer interval on its own shouldn't
+    # trigger one: the user asked to be checked less often, not right now.
+    # Skip entirely if checking is turned off, since the user just asked us
+    # to stop checking this movie.
+    if check_interval_seconds is not None and (frequency_increased or results_now_stale):
+        trigger_check(movie_id)
     return redirect(url_for("movie_detail", movie_id=movie_id))
 
 
@@ -306,8 +373,14 @@ def update_global_settings():
                 request.form.get("notify_on_new_showtime_priority", ""), "urgent"
             ),
             "default_check_interval_seconds": default_check_interval_seconds,
+            "default_view": sanitize_default_view(request.form.get("default_view", ""), "list"),
         },
     )
+    # Return to wherever the form was submitted from (index or a movie page)
+    # rather than always bouncing to index - only trust a same-site path.
+    next_path = request.form.get("next", "")
+    if next_path.startswith("/") and not next_path.startswith("//"):
+        return redirect(next_path)
     return redirect(url_for("index"))
 
 
@@ -323,7 +396,7 @@ def test_notification():
     try:
         resp = requests.post(
             endpoint,
-            data="This is a test notification from cinemacity-scraper.".encode("utf-8"),
+            data="This is a test notification from cinematix.".encode("utf-8"),
             headers={"Title": "Test notification", "Priority": "default", "Tags": "movie_camera,tickets"},
             timeout=10,
         )
@@ -345,14 +418,18 @@ def check_now():
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
+    movie_id = request.args.get("movie_id")
     checking = False
     try:
-        resp = requests.get(f"{SCRAPER_CONTROL_URL}/status", timeout=3)
+        # Scoped to movie_id so a movie with checking turned off doesn't
+        # show "Checking..." just because some *other* movie's poll cycle
+        # happens to be running - see scraper.py's CHECKING_IDS.
+        params = {"movie_id": movie_id} if movie_id else {}
+        resp = requests.get(f"{SCRAPER_CONTROL_URL}/status", params=params, timeout=3)
         checking = resp.json().get("checking", False)
     except requests.RequestException:
         pass
 
-    movie_id = request.args.get("movie_id")
     if movie_id:
         config = storage.load_config()
         movie = next((m for m in config["movies"] if m["id"] == movie_id), None)
