@@ -19,7 +19,7 @@ import storage
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMG_BASE = "https://image.tmdb.org/t/p"
-SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://cinematix:5001")
+SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://localhost:5001")
 
 # (seconds, label) options for the per-movie check-frequency dropdown.
 CHECK_INTERVAL_OPTIONS = [
