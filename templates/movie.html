@@ -266,19 +266,28 @@
   .theme-switch input:checked + .theme-switch-track { background: var(--secondary); }
   .theme-switch input:checked + .theme-switch-track .theme-switch-thumb { transform: translateX(18px); }
 
-  /* Global settings modal reuses .setting-row/.modal-actions but with the
-     stacked (label-above-field) layout from index.html rather than the
-     per-movie modal's row layout. */
+  /* Global settings modal: wider than the other dialogs and laid out
+     label-left/value-right per row, with any hint paragraph wrapping onto
+     its own full-width line below (via flex-basis: 100%) rather than being
+     squeezed into the value column. */
+  #global-settings-overlay .modal { max-width: 520px; }
   #global-settings-overlay .setting-row {
-    flex-direction: column; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem;
+    flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    column-gap: 1.5rem; row-gap: 0.4rem; margin-bottom: 1.1rem;
   }
   #global-settings-overlay .setting-row:last-child { margin-bottom: 0; }
+  #global-settings-overlay .setting-row > label:first-child { flex: 0 0 auto; white-space: nowrap; }
   #global-settings-overlay .setting-row select,
   #global-settings-overlay .setting-row input[type="text"],
   #global-settings-overlay .setting-row input[type="password"] {
-    width: 100%;
+    width: auto;
   }
-  #global-settings-overlay .setting-row select { cursor: pointer; width: auto; }
+  #global-settings-overlay .setting-row select { cursor: pointer; }
+  #global-settings-overlay .setting-row .input-with-toggle,
+  #global-settings-overlay .setting-row .setting-group {
+    flex: 1 1 auto; width: auto; max-width: 320px;
+  }
+  #global-settings-overlay .setting-row .setting-hint { flex-basis: 100%; }
   #global-settings-overlay .modal-actions { justify-content: flex-end; }
   .settings-advanced summary {
     cursor: pointer; font-size: 0.82rem; color: var(--link); list-style: none; user-select: none;

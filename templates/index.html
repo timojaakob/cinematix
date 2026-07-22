@@ -436,6 +436,28 @@
   .icon-btn.icon-only svg { width: 16px; height: 16px; }
   button:disabled, button:disabled:hover { background: #555; cursor: default; }
 
+  /* Global settings modal: wider than the add-movie dialog and laid out
+     label-left/value-right per row (rather than this page's default
+     stacked .setting-row), with any hint paragraph wrapping onto its own
+     full-width line below (via flex-basis: 100%) instead of being squeezed
+     into the value column. */
+  #global-settings-overlay .modal { max-width: 520px; }
+  #global-settings-overlay .setting-row {
+    flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    column-gap: 1.5rem; row-gap: 0.4rem;
+  }
+  #global-settings-overlay .setting-row > label:first-child { flex: 0 0 auto; white-space: nowrap; }
+  #global-settings-overlay .setting-row select,
+  #global-settings-overlay .setting-row input[type="text"],
+  #global-settings-overlay .setting-row input[type="password"] {
+    width: auto;
+  }
+  #global-settings-overlay .setting-row .input-with-toggle,
+  #global-settings-overlay .setting-row .setting-group {
+    flex: 1 1 auto; width: auto; max-width: 320px;
+  }
+  #global-settings-overlay .setting-row .setting-hint { flex-basis: 100%; }
+
   /* theme switch */
   .theme-switch { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); }
   .theme-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
