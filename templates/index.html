@@ -1,583 +1,108 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-<title>cinematix</title>
-<script>
-// Resolve the theme before first paint so there's no flash of the wrong
-// mode: an explicit choice from the settings switch wins, otherwise fall
-// back to the OS-level preference.
-(function () {
-  var stored = localStorage.getItem('cinemacity-theme');
-  var theme = (stored === 'light' || stored === 'dark')
-    ? stored
-    : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-  document.documentElement.dataset.theme = theme;
-})();
-</script>
-<style>
-  :root {
-    --bg: #14120f;
-    --text: #eeece8;
-    --text-secondary: #ccc8c0;
-    --text-muted: #9c968a;
-    --text-dim: #79736a;
-    --panel-bg: #1c1a16;
-    --card-bg: #181613;
-    --border: #2e2a24;
-    --input-bg: #100e0c;
-    --input-border: #3a352d;
-    --hover-bg: #2a2620;
-    color-scheme: dark;
+{% extends "_base.html" %}
+{% from "_macros.html" import seats %}
 
-    /* Brand accent: always exactly the logo color, unchanged between
-       themes - reserved for primary actions only (buttons, Book).
-       Near-black label text clears AA against it in both themes (6.6:1),
-       so on-accent doesn't need to vary either; only the hover shade
-       shifts, since a hover state has to differ from rest by definition.
-       Everything structural (links, hovers, selected states) lives on
-       --secondary/--link instead, orange's complement, so the accent
-       isn't spread thin across the whole UI. */
-    --accent: #f5821e;
-    --accent-hover: #e06e0a;
-    --accent-rgb: 245, 130, 30;
-    --on-accent: #211a10;
-
-    --secondary: #257e7b;
-    --secondary-hover: #2f9995;
-    --link: #4dcbc7;
-    --link-hover: #7fe0dc;
-
-    --avail: #7fbf7f;
-    --rating: #e0b040;
-    --on-rating: #211a10;
-    --danger: #e06a6a;
-    --danger-rgb: 224, 106, 106;
-    --warning: #d9a441;
-    --warning-bg: rgba(224, 176, 64, 0.12);
-    --warning-border: rgba(224, 176, 64, 0.35);
-
-    /* Bumps every rem-based size across the page in one place, rather than
-       hand-tuning dozens of individual font-size rules. */
-    font-size: 18px;
-  }
-  :root[data-theme="light"] {
-    --bg: #f7f5f1;
-    --text: #1c1a16;
-    --text-secondary: #3d392f;
-    --text-muted: #736d5f;
-    --text-dim: #948d7c;
-    --panel-bg: #fffefc;
-    --card-bg: #fbfaf7;
-    --border: #e6e1d8;
-    --input-bg: #ffffff;
-    --input-border: #d8d2c6;
-    --hover-bg: #efebe3;
-    color-scheme: light;
-
-    /* --accent/--accent-hover/--accent-rgb/--on-accent aren't redefined
-       here - the brand color stays exactly --F5821E in both themes, so
-       there's nothing to override. A saturated color tuned to pop on a
-       dark ground looks flat reused on white, though, so the secondary
-       teal still gets its own light-mode value: one richer shade that
-       works as both link text and fill, rather than the darker,
-       duller-looking clone a naive per-theme darken would produce. */
-    --secondary: #1f7a77;
-    --secondary-hover: #185f5c;
-    --link: #1f7a77;
-    --link-hover: #185f5c;
-
-    --avail: #2f7d3f;
-    --danger: #b33a3a;
-    --danger-rgb: 179, 58, 58;
-    --warning: #8a6414;
-    --warning-bg: rgba(138, 100, 20, 0.10);
-    --warning-border: rgba(138, 100, 20, 0.35);
-  }
-  /* Self-hosted (not a Google Fonts CDN link) so the app keeps working
-     fully offline/LAN-only - just the one weight the wordmark needs. */
-  @font-face {
-    font-family: 'Elms Sans';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('{{ url_for("static", filename="elms-sans-bold.woff2") }}') format('woff2');
-  }
-  html, body { height: 100%; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    display: flex;
-    flex-direction: column;
-    /* The header lives outside the scrolling area (below) so its own width
-       is never affected by whether that area's content is tall enough to
-       need a scrollbar - otherwise the header's right edge would land in a
-       different place on a short page than on a tall one. */
-    overflow: hidden;
-  }
-  /* Scrolls independently of .brand - see the .body overflow note above. */
-  .scroll-area {
-    flex: 1 1 auto;
-    overflow-y: auto;
-  }
-  .page {
-    max-width: 1500px;
-    margin: 0 auto;
-    padding: 1.75rem 2rem 3rem;
-    box-sizing: border-box;
-  }
-  .brand {
-    display: flex; align-items: center; gap: 0.6rem;
-    padding: 1rem 2rem;
-    background: var(--panel-bg);
-    border-bottom: 1px solid var(--border);
-    box-sizing: border-box;
-    flex: 0 0 auto;
-  }
-  /* Baseline-aligned with the wordmark, then nudged down a couple px -
-     sitting exactly on the baseline reads as slightly too high next to
-     text, since a hard-edged square optically outweighs a letterform. */
-  .brand img.logo { width: 54px; height: 54px; border-radius: 6px; position: relative; top: 3px; }
-  .brand .icon-btn { margin-left: auto; }
-  .brand-link { display: flex; align-items: baseline; gap: 0.6rem; color: inherit; text-decoration: none; }
-  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
-  .brand h1 {
-    font-family: 'Elms Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-size: 2.2rem;
-    margin: 0;
-  }
-  .subtitle { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
-  section {
-    background: var(--panel-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
-    margin-bottom: 1.5rem;
-  }
-  h2 { font-size: 1rem; margin-top: 0; color: var(--text-secondary); }
-  button {
-    background: var(--accent);
-    color: var(--on-accent);
-    border: none;
-    border-radius: 6px;
-    padding: 0.4rem 1rem;
-    font-size: 0.85rem;
-    cursor: pointer;
-  }
-  /* :where() keeps this at zero specificity, so every other button variant's
-     own :hover rule (remove-btn, modal-close, search-clear, ...) naturally
-     wins without needing a growing list of :not() exclusions here. */
-  :where(button):hover { background: var(--accent-hover); }
-  /* Only the actual filled accent buttons get the tinted lift in light
-     mode - listed explicitly rather than "every button except X" so a
-     non-accent button can never inherit an orange glow it didn't ask for. */
-  :root[data-theme="light"] #add-movie-confirm-btn:not(:disabled),
-  :root[data-theme="light"] #ntfy-test-btn:not(:disabled),
-  :root[data-theme="light"] #global-settings-apply-btn:not(:disabled) {
-    box-shadow: 0 6px 16px -4px rgba(var(--accent-rgb), 0.45);
-  }
-  .icon-btn {
-    display: inline-flex; align-items: center; justify-content: center;
-    background: transparent; color: var(--text-muted); border: 1px solid var(--input-border);
-    border-radius: 6px; padding: 0.4rem; cursor: pointer; flex-shrink: 0;
-  }
-  .icon-btn svg { width: 17px; height: 17px; }
-  .icon-btn:hover { background: transparent; border-color: var(--secondary); color: var(--text); }
-  /* Matches movie.html's settings gear, which inherits the brighter
-     text-secondary from that page's filters/view-toggle .icon-btn base. */
-  #global-settings-btn { color: var(--text-secondary); }
-
-  /* search */
-  .search-wrap { position: relative; }
-  .search-wrap .search-icon {
-    position: absolute;
-    left: 0.75rem;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 17px;
-    height: 17px;
-    color: var(--text-muted);
-    pointer-events: none;
-  }
-  input[type="text"] {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--input-bg);
-    color: var(--text);
-    border: 1px solid var(--input-border);
-    border-radius: 6px;
-    padding: 0.6rem 0.75rem 0.6rem 2.25rem;
-    font-size: 0.95rem;
-  }
-  #movie-search { padding-right: 2.25rem; }
-  .search-clear {
-    display: none; position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
-    align-items: center; justify-content: center; background: transparent; border: none;
-    color: var(--text-muted); cursor: pointer; padding: 0.3rem; border-radius: 50%; line-height: 1; font-size: 0.95rem;
-  }
-  .search-clear.visible { display: flex; }
-  .search-clear:hover { color: var(--text); background: var(--hover-bg); }
-  .search-row .already-tag {
-    margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 0.68rem; color: var(--text-dim);
-    border: 1px solid var(--input-border); border-radius: 4px; padding: 0.1rem 0.4rem;
-  }
-  .dialog-warning {
-    font-size: 0.78rem; color: var(--warning); background: var(--warning-bg);
-    border: 1px solid var(--warning-border); border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 0.75rem;
-  }
-  #search-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    background: var(--panel-bg);
-    border: 1px solid var(--input-border);
-    border-radius: 6px;
-    max-height: 340px;
-    overflow-y: auto;
-    z-index: 10;
-    display: none;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-  }
-  #search-dropdown.open { display: block; }
-  .search-row {
-    display: flex;
-    gap: 0.6rem;
-    padding: 0.5rem 0.75rem;
-    cursor: pointer;
-    align-items: center;
-  }
-  .search-row:hover, .search-row.active { background: var(--hover-bg); }
-  .search-row img { width: 32px; height: 48px; object-fit: cover; border-radius: 3px; background: var(--input-border); }
-  .search-row .thumb-placeholder { width: 32px; height: 48px; border-radius: 3px; background: var(--input-border); flex-shrink: 0; }
-  .search-row .meta { font-size: 0.85rem; line-height: 1.3; }
-  .search-row .meta .title { color: var(--text); }
-  .search-row .meta .year { color: var(--text-muted); }
-  .search-empty { padding: 0.6rem 0.75rem; color: var(--text-dim); font-size: 0.85rem; font-style: italic; }
-
-  /* movie grid */
-  .movie-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 230px));
-    justify-content: start;
-    gap: 1.25rem;
-  }
-  .movie-card-wrap { position: relative; }
-  @keyframes cc-added-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
-    20% { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.55); }
-  }
-  .movie-card-wrap.just-added { border-radius: 8px; animation: cc-added-pulse 1.4s ease-out 1; }
-  .movie-card {
-    display: block;
-    background: var(--card-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-    text-decoration: none;
-    color: inherit;
-  }
-  .movie-card:hover { border-color: var(--secondary); }
-  .movie-card .poster {
-    width: 100%;
-    aspect-ratio: 2 / 3;
-    object-fit: cover;
-    background: var(--hover-bg);
-    display: block;
-  }
-  .movie-card .poster-placeholder {
-    width: 100%;
-    aspect-ratio: 2 / 3;
-    background: var(--hover-bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    text-align: center;
-    padding: 0.5rem;
-    box-sizing: border-box;
-  }
-  .movie-card .info { padding: 0.6rem; min-height: 5.3rem; box-sizing: border-box; }
-  .movie-card .title {
-    font-size: 0.85rem;
-    font-weight: 600;
-    line-height: 1.3;
-    margin-bottom: 0.3rem;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  .movie-card .runtime,
-  .movie-card .release-date {
-    font-size: 0.75rem;
-    line-height: 1.3;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .movie-card .runtime { margin-bottom: 0.15rem; }
-  .card-status {
-    display: flex; align-items: center; gap: 0.35rem;
-    font-size: 0.72rem; color: var(--text-muted); margin-top: 0.4rem;
-  }
-  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-dim); }
-  .status-dot.good { background: var(--avail); }
-  .status-dot.fair { background: var(--rating); }
-  .status-dot.low, .status-dot.sold-out { background: var(--danger); }
-  .remove-control {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 2;
-    display: flex;
-    align-items: stretch;
-    gap: 6px;
-  }
-  .remove-confirm-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #b53c3c;
-    color: #fff;
-    border: none;
-    border-radius: 11px;
-    height: 22px;
-    max-width: 0;
-    padding: 0;
-    font-size: 0.72rem;
-    white-space: nowrap;
-    overflow: hidden;
-    opacity: 0;
-    cursor: pointer;
-    transition: max-width 0.2s ease, opacity 0.15s ease, padding 0.2s ease;
-  }
-  .remove-control.confirming .remove-confirm-btn {
-    max-width: 200px;
-    padding: 0 0.6rem;
-    opacity: 1;
-  }
-  .remove-confirm-btn:hover { background: #c94a4a; }
-  .remove-btn {
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    box-sizing: border-box;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    background: rgba(0,0,0,0.6);
-    color: #eee;
-    border: none;
-    cursor: pointer;
-    font-size: 0.8rem;
-    line-height: 1;
-  }
-  .remove-btn:hover, .remove-control.confirming .remove-btn { background: #b53c3c; }
-  .empty { color: var(--text-dim); font-style: italic; padding: 0.5rem 0; }
-
-  /* add-movie / settings dialogs */
-  .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-    align-items: center; justify-content: center; z-index: 100; padding: 1rem;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal {
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px;
-    padding: 1.1rem 1.4rem 1.4rem; width: 100%; max-width: 420px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
-    max-height: 85vh; overflow-y: auto; box-sizing: border-box;
-  }
-  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; gap: 0.75rem; }
-  .modal-header h2 { margin: 0; font-size: 1rem; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .modal-close {
-    background: transparent; border: none; color: var(--text-muted); font-size: 1.2rem; line-height: 1;
-    padding: 0.2rem 0.5rem; border-radius: 5px; cursor: pointer; flex-shrink: 0;
-  }
-  .modal-close:hover { color: var(--text); background: var(--hover-bg); }
-  .modal-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
-  .setting-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; }
-  .setting-row:last-child { margin-bottom: 0; }
-  .setting-row label { font-size: 0.8rem; color: var(--text-muted); }
-  .format-checkboxes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-  .setting-hint { margin: 0.3rem 0 0; font-size: 0.75rem; color: var(--text-dim); }
-  label.day-toggle {
-    display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);
-    cursor: pointer; border: 1px solid var(--input-border); border-radius: 5px; padding: 0.2rem 0.5rem;
-  }
-  label.day-toggle:has(input:checked) { border-color: var(--secondary); color: var(--text); }
-  .setting-row select,
-  .setting-row input[type="text"],
-  .setting-row input[type="password"] {
-    background: var(--input-bg); color: var(--text); border: 1px solid var(--input-border);
-    border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.85rem; width: 100%; box-sizing: border-box;
-  }
-  .setting-row select { cursor: pointer; width: auto; }
-  .setting-group { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; }
-  .notify-case { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; width: 100%; }
-  .notify-case select { flex-shrink: 0; }
-  .setting-row label.checkbox {
-    display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer;
-  }
-  .input-with-toggle { display: flex; gap: 0.4rem; align-items: center; width: 100%; }
-  .input-with-toggle input { flex: 1; min-width: 0; }
-  .input-with-toggle button { flex-shrink: 0; }
-  .icon-btn.icon-only { padding: 0.4rem; flex-shrink: 0; }
-  .setting-hint.error { color: var(--danger); }
-  .setting-hint.success { color: var(--avail); }
-  .icon-btn.icon-only svg { width: 16px; height: 16px; }
-  button:disabled, button:disabled:hover { background: #555; cursor: default; }
-
-  /* Global settings modal: wider than the add-movie dialog and laid out
-     label-left/value-right per row (rather than this page's default
-     stacked .setting-row), with any hint paragraph wrapping onto its own
-     full-width line below (via flex-basis: 100%) instead of being squeezed
-     into the value column. */
-  #global-settings-overlay .modal { max-width: 520px; }
-  #global-settings-overlay .setting-row {
-    flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between;
-    column-gap: 1.5rem; row-gap: 0.4rem;
-  }
-  #global-settings-overlay .setting-row > label:first-child { flex: 0 0 auto; white-space: nowrap; }
-  #global-settings-overlay .setting-row select,
-  #global-settings-overlay .setting-row input[type="text"],
-  #global-settings-overlay .setting-row input[type="password"] {
-    width: auto;
-  }
-  #global-settings-overlay .setting-row .input-with-toggle,
-  #global-settings-overlay .setting-row .setting-group {
-    flex: 1 1 auto; width: auto; max-width: 320px;
-  }
-  #global-settings-overlay .setting-row .setting-hint { flex-basis: 100%; }
-
-  /* theme switch */
-  .theme-switch { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); }
-  .theme-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .theme-switch-track {
-    position: relative; width: 40px; height: 22px; border-radius: 11px;
-    background: var(--input-border); transition: background 0.2s ease; flex-shrink: 0;
-  }
-  .theme-switch-thumb {
-    position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
-    background: var(--panel-bg); transition: transform 0.2s ease;
-  }
-  .theme-switch input:checked + .theme-switch-track { background: var(--secondary); }
-  .theme-switch input:checked + .theme-switch-track .theme-switch-thumb { transform: translateX(18px); }
-</style>
-</head>
-<body>
-  <div class="brand">
-    <a class="brand-link" href="{{ url_for('index') }}">
-      <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
-      <h1>cinematix</h1>
-    </a>
-    <button id="global-settings-btn" type="button" class="icon-btn" aria-label="Settings" aria-haspopup="dialog" aria-controls="global-settings-overlay">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <line x1="4" y1="6" x2="20" y2="6"></line>
-        <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"></circle>
-        <line x1="4" y1="12" x2="20" y2="12"></line>
-        <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"></circle>
-        <line x1="4" y1="18" x2="20" y2="18"></line>
-        <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"></circle>
-      </svg>
+{% block content %}
+  <div class="search">
+    <label for="movie-search" class="visually-hidden">Add a movie to monitor</label>
+    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>
+    </svg>
+    <input type="search" id="movie-search" placeholder="Add a movie to monitor" autocomplete="off" enterkeyhint="search"
+           role="combobox" aria-expanded="false" aria-controls="search-dropdown" aria-autocomplete="list">
+    <button type="button" id="search-clear" class="icon-btn search-clear" aria-label="Clear search" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button>
+    <div id="search-dropdown" role="listbox" aria-label="Search results"></div>
   </div>
-
-  {% include "_global_settings_modal.html" %}
-
-  <div class="scroll-area"><div class="page">
-
-  <section>
-    <h2>Search movies</h2>
-    <div class="search-wrap">
-      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="11" cy="11" r="8"></circle>
-        <path d="m21 21-4.3-4.3"></path>
-      </svg>
-      <input type="text" id="movie-search" placeholder="Search for a movie…" autocomplete="off">
-      <button type="button" id="search-clear" class="search-clear" aria-label="Clear search">✕</button>
-      <div id="search-dropdown"></div>
-    </div>
-  </section>
 
   <div id="add-movie-overlay" class="modal-overlay">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-movie-title">
       <div class="modal-header">
         <h2 id="add-movie-title">Add movie</h2>
-        <button id="add-movie-close-btn" type="button" class="modal-close" aria-label="Cancel">✕</button>
+        <button id="add-movie-close-btn" type="button" class="icon-btn" aria-label="Cancel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </div>
-      <p id="add-movie-warning" class="dialog-warning" style="display:none;"></p>
-      <div class="setting-row">
-        <label>Formats to check</label>
-        <div id="add-movie-formats" class="format-checkboxes">
+      <p id="add-movie-warning" class="notice" style="display:none;"></p>
+      <div class="field">
+        <span class="field-label">Formats to watch for</span>
+        <div id="add-movie-formats" class="chips">
           {% for fmt in all_formats %}
-          <label class="day-toggle"><input type="checkbox" class="add-movie-format" value="{{ fmt }}"> {{ fmt }}</label>
+          <label class="chip"><input type="checkbox" class="add-movie-format" value="{{ fmt }}"> {{ fmt }}</label>
           {% endfor %}
         </div>
+        <p class="hint">Only showtimes in the selected formats trigger a notification.</p>
       </div>
-      <p class="setting-hint">No formats selected means no showtimes will match.</p>
-      <p id="add-movie-error" class="setting-hint error" style="display:none;"></p>
+      <p id="add-movie-error" class="hint error" style="display:none;"></p>
       <div class="modal-actions">
-        <button id="add-movie-confirm-btn" type="button">Add movie</button>
+        <button id="add-movie-confirm-btn" type="button" class="btn btn-primary-wide">Add movie</button>
       </div>
     </div>
   </div>
 
-  <section>
-    <h2>Monitored movies</h2>
-    {% if movies %}
-    <div class="movie-grid">
-      {% for m in movies %}
-      <div class="movie-card-wrap" data-movie-id="{{ m.id }}">
-        <form method="post" action="{{ url_for('remove_movie', movie_id=m.id) }}" class="remove-control">
-          <button type="button" class="remove-confirm-btn">Remove from Monitored?</button>
-          <button type="button" class="remove-btn" title="Remove" aria-label="Remove {{ m.title }} from monitored movies">×</button>
-        </form>
-        <a class="movie-card" href="{{ url_for('movie_detail', movie_id=m.id) }}">
-          {% if m.poster_url %}
-            <img class="poster" src="{{ m.poster_url }}" alt="">
-          {% else %}
-            <div class="poster-placeholder">{{ m.title }}</div>
-          {% endif %}
-          <div class="info">
-            <div class="title">{{ m.title }}</div>
-            {% if m.runtime %}<div class="runtime">{{ m.runtime }} min</div>{% endif %}
-            {% if m.release_date %}<div class="release-date">{{ m.release_date | humandate(with_time=False) }}</div>{% endif %}
-            <div class="card-status">
-              <span class="status-dot {{ m.status_tier }}"></span>
-              {% if m.showtime_count == 0 %}
-                Nothing yet
-              {% elif m.status_tier == 'sold-out' %}
-                Sold out
-              {% else %}
-                {{ m.showtime_count }} showtime{{ 's' if m.showtime_count != 1 else '' }}
-              {% endif %}
-            </div>
+  <div class="list-head">
+    <h1>Monitoring</h1>
+    {% if movies %}<span class="count">{{ movies | length }} movie{{ 's' if movies | length != 1 else '' }}</span>{% endif %}
+  </div>
+
+  {% if movies %}
+  <ul class="films">
+    {% for m in movies %}
+    {% set tier = {'good': 'good', 'fair': 'fair', 'low': 'low', 'sold-out': 'sold', 'none': 'none'}[m.status_tier] %}
+    <li>
+      <a class="film" href="{{ url_for('movie_detail', movie_id=m.id) }}" data-movie-id="{{ m.id }}">
+        {% if m.poster_url %}
+          <img class="film-poster" src="{{ m.poster_url | replace('/w342/', '/w185/') }}" alt="" width="76" height="114" loading="lazy" decoding="async">
+        {% else %}
+          <div class="film-poster-ph" aria-hidden="true">{{ m.title }}</div>
+        {% endif %}
+        <div class="film-body">
+          <span class="film-title">{{ m.title }}</span>
+          <div class="film-status">
+            {% if m.showtime_count == 0 %}
+              <span class="summary">No showtimes yet</span>
+            {% elif m.open_count == 0 and m.upcoming_count %}
+              {{ seats(0, 'none', 'Booking not open yet') }}
+              <span class="summary"><span class="seat-label tier-upcoming">Opens {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}</span>, {{ m.upcoming_count }} showtime{{ 's' if m.upcoming_count != 1 else '' }}</span>
+            {% elif m.open_count == 0 %}
+              {{ seats(0, 'sold', 'Sold out') }}
+              <span class="summary">Sold out, {{ m.showtime_count }} showtime{{ 's' if m.showtime_count != 1 else '' }}</span>
+            {% else %}
+              {% set pct = (m.best_availability * 100) | round | int %}
+              {{ seats(m.best_availability, tier, 'Best showtime ' ~ pct ~ '% free') }}
+              <span class="summary"><span class="seat-label tier-{{ tier }}">{{ pct }}% free</span> at best, {{ m.open_count }} on sale{% if m.upcoming_count %}, {{ m.upcoming_count }} more from {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}{% endif %}</span>
+            {% endif %}
+            {% if m.new_count %}<span class="badge-new">{{ m.new_count }} new</span>{% endif %}
           </div>
-        </a>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-      <p class="empty">Nothing monitored yet — search above to add a movie.</p>
-    {% endif %}
-  </section>
+          <div class="film-meta">
+            {% if m.check_interval_seconds is none %}
+              <span>Checking off</span>
+            {% else %}
+              <span>{{ interval_labels.get(m.check_interval_seconds, 'Every ' ~ m.check_interval_seconds ~ ' s') }}</span>
+            {% endif %}
+            {% if m.last_checked_at %}<span>Checked <time class="rel-time" datetime="{{ m.last_checked_at }}">{{ m.last_checked_at | relativedate }}</time></span>{% endif %}
+            {% if m.required_formats %}<span>{{ m.required_formats | join(', ') }}</span>{% endif %}
+          </div>
+        </div>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty-state">
+    <strong>Nothing monitored yet</strong>
+    Search for a movie above. You get a notification as soon as Cinema City Flora lists a showtime for it.
+  </div>
+  {% endif %}
+{% endblock %}
 
-  </div></div>
-
+{% block scripts %}
 <script>
 const searchInput = document.getElementById('movie-search');
 const searchClearBtn = document.getElementById('search-clear');
 const dropdown = document.getElementById('search-dropdown');
 let debounceTimer = null;
+let searchSeq = 0;
 let currentResults = [];
 let activeIndex = -1;
 
@@ -607,12 +132,13 @@ function openAddDialog(result) {
   addMovieError.style.display = 'none';
   const alreadyAdded = EXISTING_TMDB_IDS.has(result.tmdb_id);
   addMovieWarning.textContent = alreadyAdded
-    ? "You're already monitoring this movie - continuing will reset its check frequency, formats, and history to the values below."
+    ? "You already monitor this movie. Adding it again resets its check frequency, formats and history."
     : '';
   addMovieWarning.style.display = alreadyAdded ? '' : 'none';
-  addMovieConfirmBtn.textContent = alreadyAdded ? 'Update movie' : 'Add movie';
-  dropdown.classList.remove('open');
-  addMovieOverlay.classList.add('open');
+  addMovieConfirmBtn.textContent = alreadyAdded ? 'Add again' : 'Add movie';
+  addMovieConfirmBtn.disabled = false;
+  closeDropdown();
+  openSheet(addMovieOverlay);
 }
 
 function closeAddDialog() {
@@ -633,11 +159,21 @@ addMovieConfirmBtn.addEventListener('click', () => {
   addMovie(pendingMovie.tmdb_id, formats);
 });
 
+function openDropdown() {
+  dropdown.classList.add('open');
+  searchInput.setAttribute('aria-expanded', 'true');
+}
+function closeDropdown() {
+  dropdown.classList.remove('open');
+  searchInput.setAttribute('aria-expanded', 'false');
+}
+
 function updateActive() {
   const rows = dropdown.querySelectorAll('.search-row');
   rows.forEach((row, i) => {
     const isActive = i === activeIndex;
     row.classList.toggle('active', isActive);
+    row.setAttribute('aria-selected', String(isActive));
     if (isActive) row.scrollIntoView({ block: 'nearest' });
   });
 }
@@ -645,34 +181,61 @@ function updateActive() {
 function renderResults(results) {
   currentResults = results;
   activeIndex = -1;
-  dropdown.innerHTML = '';
+  dropdown.replaceChildren();
   if (results.length === 0) {
-    dropdown.innerHTML = '<div class="search-empty">No results</div>';
+    const empty = document.createElement('div');
+    empty.className = 'search-empty';
+    empty.textContent = 'No movies found. Check the spelling or try the original title.';
+    dropdown.appendChild(empty);
   } else {
     for (const r of results) {
-      const row = document.createElement('div');
+      const row = document.createElement('button');
+      row.type = 'button';
       row.className = 'search-row';
-      const thumb = r.poster_thumb
-        ? `<img src="${r.poster_thumb}" alt="">`
-        : `<div class="thumb-placeholder"></div>`;
-      const alreadyTag = EXISTING_TMDB_IDS.has(r.tmdb_id) ? '<span class="already-tag">Monitored</span>' : '';
-      row.innerHTML = `${thumb}<div class="meta"><div class="title">${r.title}</div><div class="year">${r.year || ''}</div></div>${alreadyTag}`;
+      row.setAttribute('role', 'option');
+      if (r.poster_thumb) {
+        const img = document.createElement('img');
+        img.src = r.poster_thumb; img.alt = ''; img.loading = 'lazy'; img.width = 36; img.height = 54;
+        row.appendChild(img);
+      } else {
+        const ph = document.createElement('span');
+        ph.className = 'thumb-placeholder';
+        row.appendChild(ph);
+      }
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = r.title;
+      const year = document.createElement('div');
+      year.className = 'year';
+      year.textContent = r.year || '';
+      meta.append(title, year);
+      row.appendChild(meta);
+      if (EXISTING_TMDB_IDS.has(r.tmdb_id)) {
+        const tag = document.createElement('span');
+        tag.className = 'already';
+        tag.textContent = 'Monitored';
+        row.appendChild(tag);
+      }
       row.addEventListener('click', () => openAddDialog(r));
       dropdown.appendChild(row);
     }
   }
-  dropdown.classList.add('open');
+  openDropdown();
 }
 
 function renderSearchError() {
   currentResults = [];
   activeIndex = -1;
-  dropdown.innerHTML = '<div class="search-empty">Search failed — check the TMDb API key in Settings and try again.</div>';
-  dropdown.classList.add('open');
+  dropdown.innerHTML = '<div class="search-empty">Search failed. Check the TMDb API key in Settings, then try again.</div>';
+  openDropdown();
 }
 
 async function addMovie(tmdbId, requiredFormats) {
   addMovieError.style.display = 'none';
+  addMovieConfirmBtn.disabled = true;
+  addMovieConfirmBtn.textContent = 'Adding…';
   let resp;
   try {
     resp = await fetch('{{ url_for("add_movie") }}', {
@@ -681,25 +244,25 @@ async function addMovie(tmdbId, requiredFormats) {
       body: JSON.stringify({ tmdb_id: tmdbId, required_formats: requiredFormats }),
     });
   } catch (e) {
-    addMovieError.textContent = 'Could not reach the server.';
-    addMovieError.style.display = '';
-    return;
+    resp = null;
   }
-  if (resp.ok) {
+  if (resp && resp.ok) {
     const data = await resp.json();
     try {
       sessionStorage.setItem('cc-just-added', data.movie.id);
     } catch (e) { /* storage unavailable (private mode, quota, ...) */ }
-    window.location.reload();
-  } else {
-    const data = await resp.json().catch(() => ({}));
-    addMovieError.textContent = data.error || 'Could not add movie.';
-    addMovieError.style.display = '';
+    cxReload();
+    return;
   }
+  const data = resp ? await resp.json().catch(() => ({})) : {};
+  addMovieError.textContent = resp ? (data.error || 'Could not add the movie. Try again.') : 'Could not reach the server. Check your connection and try again.';
+  addMovieError.style.display = '';
+  addMovieConfirmBtn.disabled = false;
+  addMovieConfirmBtn.textContent = 'Add movie';
 }
 
 function updateSearchClearVisibility() {
-  searchClearBtn.classList.toggle('visible', searchInput.value.length > 0);
+  searchClearBtn.hidden = searchInput.value.length === 0;
 }
 
 searchInput.addEventListener('input', () => {
@@ -707,31 +270,34 @@ searchInput.addEventListener('input', () => {
   clearTimeout(debounceTimer);
   const q = searchInput.value.trim();
   if (!q) {
-    dropdown.classList.remove('open');
+    closeDropdown();
     return;
   }
   debounceTimer = setTimeout(async () => {
+    // Drop responses that arrive after a newer search was started, so a
+    // slow early request can't overwrite the results for what's typed now.
+    const seq = ++searchSeq;
     try {
       const resp = await fetch('{{ url_for("api_search") }}?q=' + encodeURIComponent(q));
       if (!resp.ok) throw new Error('search request failed');
       const results = await resp.json();
-      renderResults(results);
+      if (seq === searchSeq) renderResults(results);
     } catch (e) {
-      renderSearchError();
+      if (seq === searchSeq) renderSearchError();
     }
-  }, 300);
+  }, 250);
 });
 
 searchClearBtn.addEventListener('click', () => {
   searchInput.value = '';
   updateSearchClearVisibility();
-  dropdown.classList.remove('open');
+  closeDropdown();
   searchInput.focus();
 });
 
 searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeDropdown(); return; }
   if (!dropdown.classList.contains('open') || currentResults.length === 0) return;
-
   if (e.key === 'ArrowDown') {
     e.preventDefault();
     activeIndex = Math.min(activeIndex + 1, currentResults.length - 1);
@@ -741,51 +307,43 @@ searchInput.addEventListener('keydown', (e) => {
     activeIndex = Math.max(activeIndex - 1, -1);
     updateActive();
   } else if (e.key === 'Enter') {
-    if (activeIndex >= 0) {
-      e.preventDefault();
-      openAddDialog(currentResults[activeIndex]);
-    }
-  } else if (e.key === 'Escape') {
-    dropdown.classList.remove('open');
+    e.preventDefault();
+    openAddDialog(currentResults[Math.max(activeIndex, 0)]);
   }
 });
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.search-wrap')) {
-    dropdown.classList.remove('open');
-  }
+  if (!e.target.closest('.search')) closeDropdown();
 });
 
-// --- Remove-movie confirmation: clicking the × slides a "Remove from
-// Monitored?" button out to its left instead of popping a native confirm(). ---
-document.querySelectorAll('.remove-control').forEach((control) => {
-  const removeBtn = control.querySelector('.remove-btn');
-  const confirmBtn = control.querySelector('.remove-confirm-btn');
+// The loading shell (shell.html) draws this many placeholder rows.
+try { localStorage.setItem('cx-film-count', String(document.querySelectorAll('.film').length || 1)); } catch (e) {}
 
-  removeBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    const isOpen = control.classList.contains('confirming');
-    document.querySelectorAll('.remove-control.confirming').forEach((c) => {
-      if (c !== control) c.classList.remove('confirming');
-    });
-    control.classList.toggle('confirming', !isOpen);
-  });
+// --- "Checked 2 minutes ago" stays current without a reload. ---
+function formatRelative(isoStr) {
+  const seconds = Math.max((Date.now() - new Date(isoStr).getTime()) / 1000, 0);
+  if (seconds < 30) return 'just now';
+  const minutes = Math.floor((seconds + 30) / 60);
+  if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+  const hours = Math.floor((seconds + 1800) / 3600);
+  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+  const days = Math.floor((seconds + 43200) / 86400);
+  return `${days} day${days !== 1 ? 's' : ''} ago`;
+}
+setInterval(() => {
+  for (const el of document.querySelectorAll('.rel-time')) el.textContent = formatRelative(el.getAttribute('datetime'));
+}, 15000);
 
-  confirmBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    control.submit();
-  });
+// Coming back to the tab (e.g. from an ntfy notification) should show
+// fresh statuses, not whatever was loaded hours ago.
+let hiddenAt = null;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 60000 && !document.querySelector('.modal-overlay.open')) cxReload();
 });
 
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.remove-control')) {
-    document.querySelectorAll('.remove-control.confirming').forEach((c) => c.classList.remove('confirming'));
-  }
-});
-
-// --- Acknowledge a just-added movie with a brief highlight instead of a
-// blocking toast: addMovie() stashes the new id before reloading, so it
-// survives the full-page reload that add currently does. ---
+// --- Acknowledge a just-added movie with a brief highlight: addMovie()
+// stashes the new id before reloading, so it survives the reload. ---
 (function highlightJustAdded() {
   let justAddedId;
   try {
@@ -795,14 +353,11 @@ document.addEventListener('click', (e) => {
     return;
   }
   if (!justAddedId) return;
-  const card = document.querySelector(`.movie-card-wrap[data-movie-id="${CSS.escape(justAddedId)}"]`);
-  if (!card) return;
-  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  card.classList.add('just-added');
-  card.addEventListener('animationend', () => card.classList.remove('just-added'), { once: true });
+  const row = document.querySelector(`.film[data-movie-id="${CSS.escape(justAddedId)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center' });
+  row.classList.add('just-added');
+  row.addEventListener('animationend', () => row.classList.remove('just-added'), { once: true });
 })();
 </script>
-
-{% include "_global_settings_script.html" %}
-</body>
-</html>
+{% endblock %}

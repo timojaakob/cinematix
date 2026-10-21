@@ -12,9 +12,10 @@ matching, non-sold-out showing appears. It does not automate purchases.
 Two processes share one image and one `/data` volume:
 
 - `scraper.py` — polls Cinema City on a loop, matches showtimes against your
-  monitored movies, and sends one summary ntfy notification per poll cycle
-  when new matches appear (deep-linking to the web UI, not to a single
-  showtime).
+  monitored movies, and sends up to two ntfy notifications per poll cycle:
+  one when new matches appear, and one when seats free up in a known
+  match (e.g. expired baskets after a drop). A push about a single showtime
+  opens its booking page; a push about several opens the web UI.
 - `webui.py` — a small local-only Flask app for searching [TMDb](https://www.themoviedb.org/)
   to add movies to monitor (poster/runtime/overview shown for each), and for
   each movie: which formats to check for (IMAX/3D/2D), how often, its
@@ -48,6 +49,16 @@ Key findings baked into `scraper.py`:
   drops the `/api/` segment.
 - Unpublished future dates return `HTTP 200` with empty arrays (not an
   error) — Cinema City publishes schedules weekly.
+- **Booking open time**: showtimes are often published before booking
+  opens. The feed doesn't say when it opens, but the booking site's own
+  `GET https://tickets.cinemacity.cz/api/presentations/{eventId}` does
+  (`ticketSaleStart`, Prague local time; also `ticketSaleStop` and
+  `isMemberSaleOnly`). While a screening is locked, it returns only
+  `{"error": {"error": "TICKETING_NOT_STARTED", "data": "2026-10-20 09:00"}}`.
+  It always answers HTTP 200, even for errors, and needs no login or
+  reCAPTCHA. The container must run with `TZ=Europe/Prague`. cinematix fetches it
+  once per matched showtime, caches it in `state.json`, and rechecks
+  upcoming times hourly until booking opens.
 
 ## Configuration
 
@@ -72,6 +83,7 @@ see below). Everything else is an environment variable:
 | `WEBUI_URL` | `https://cine.vfk.ovh` | Click-through link on ntfy notifications (point this at wherever the web UI is reachable) |
 | `STATE_FILE` | `/data/state.json` | Dedup state so repeat polls don't re-notify |
 | `TMDB_API_KEY` | — | One-time seed only, used by `webui.py` for movie search (free key from [themoviedb.org](https://www.themoviedb.org/settings/api)); the live key is set in the web UI's settings dialog |
+| `AVAILABILITY_RISE_THRESHOLD` | `0` | A "seats freed up" push is sent when a showtime's free-seat ratio rises by more than this over its lowest value since the last push (`0` = any returned seat, `0.05` = 5 % of the hall) |
 | `DEBUG` | `false` | Verbose logging, including raw API payloads |
 
 ## Running
@@ -132,7 +144,7 @@ services:
   default view (List/Calendar) for a movie's showtimes, your TMDb API key
   (masked by default, with a show/hide toggle), and notifications —
   independent enable/disable and ntfy priority for each case ("scraper
-  started", "new showtime found"), an ntfy endpoint field, and a **Test**
+  started", "new showtimes", "seats freed up"), an ntfy endpoint field, and a **Test**
   button that sends a live test push to whatever's currently typed there,
   even if unsaved.
 - **Per-movie settings** — a gear icon on each movie's page opens a dialog
@@ -147,7 +159,8 @@ services:
   date, IMDb/TMDb links, a **Check now** button that forces an immediate
   poll for just this movie, and every currently matching showtime (format,
   audio/subtitle language as a code next to a dub/captions icon,
-  availability %, a working `Book` link), sortable by any column. A
+  availability %, or when booking opens if it hasn't yet, a working `Book`
+  link), sortable by any column. A
   **List/Calendar** toggle switches to a month grid color-coded by that
   day's best availability, click a day for its agenda. Filters (hide low
   availability, time range, weekdays, audio, format) are built dynamically

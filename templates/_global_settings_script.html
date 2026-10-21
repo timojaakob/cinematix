@@ -10,6 +10,7 @@ const themeLabel = document.getElementById('theme-switch-label');
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#eef1f5' : '#0e1116';
   themeInput.checked = theme === 'light';
   themeLabel.textContent = theme === 'light' ? 'Light mode' : 'Dark mode';
   document.dispatchEvent(new CustomEvent('cc-theme-changed'));
@@ -23,12 +24,27 @@ themeInput.addEventListener('change', () => {
   applyTheme(theme);
 });
 
+// --- Sheets: every .modal-overlay locks page scroll while open, so a
+// bottom sheet can be scrolled on a phone without dragging the page
+// underneath. Shared by every dialog on every page. ---
+const sheetObserver = new MutationObserver(() => {
+  document.documentElement.style.overflow = document.querySelector('.modal-overlay.open') ? 'hidden' : '';
+});
+for (const overlay of document.querySelectorAll('.modal-overlay')) {
+  sheetObserver.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+}
+function openSheet(overlay) {
+  overlay.classList.add('open');
+  const focusTarget = overlay.querySelector('.modal-header .icon-btn');
+  if (focusTarget) focusTarget.focus({ preventScroll: true });
+}
+
 // --- Global settings modal ---
 const globalSettingsBtn = document.getElementById('global-settings-btn');
 const globalSettingsOverlay = document.getElementById('global-settings-overlay');
 const globalSettingsCloseBtn = document.getElementById('global-settings-close-btn');
 
-globalSettingsBtn.addEventListener('click', () => globalSettingsOverlay.classList.add('open'));
+globalSettingsBtn.addEventListener('click', () => openSheet(globalSettingsOverlay));
 globalSettingsCloseBtn.addEventListener('click', () => globalSettingsOverlay.classList.remove('open'));
 globalSettingsOverlay.addEventListener('click', (e) => {
   if (e.target === globalSettingsOverlay) globalSettingsOverlay.classList.remove('open');

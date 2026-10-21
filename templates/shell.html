@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+{% include "_head.html" %}
+<title>cinematix</title>
+</head>
+<body class="is-shell">
+<script>
+  // Pick the placeholder that matches the page being opened before
+  // anything paints, so the layout doesn't jump when the page arrives.
+  document.documentElement.dataset.shell = /^\/movies\//.test(location.pathname) ? 'movie' : 'index';
+  // The movie list remembers how many rows it had (see index.html), so
+  // the placeholder shows the same number.
+  try { document.documentElement.dataset.films = localStorage.getItem('cx-film-count') || '4'; } catch (e) {}
+</script>
+{% include "_topbar.html" %}
+
+{# One row of the seat strip. --i staggers the wave seat by seat. #}
+{% macro wave() -%}
+<span class="seats sk-seats" aria-hidden="true">{% for i in range(20) %}<i style="--i:{{ i }}"></i>{% endfor %}</span>
+{%- endmacro %}
+
+<main class="wrap" aria-busy="true">
+  <p class="visually-hidden" role="status">Loading</p>
+  <div class="sk-message" id="sk-message" hidden>
+    <strong id="sk-message-title"></strong>
+    <span id="sk-message-text"></span>
+    <button type="button" class="btn" id="sk-retry" hidden>Try again</button>
+  </div>
+
+  <div class="sk sk-index" aria-hidden="true">
+    <div class="sk-block sk-search"></div>
+    <div class="list-head"><div class="sk-block sk-h1"></div></div>
+    <ul class="films">
+      {% for w in [62, 48, 70, 55] %}
+      <li>
+        <div class="film">
+          <div class="sk-block film-poster"></div>
+          <div class="film-body">
+            <div class="sk-block sk-line sk-title" style="width: {{ w }}%"></div>
+            <div class="film-status">{{ wave() }}<div class="sk-block sk-line" style="width: 7rem"></div></div>
+            <div class="sk-block sk-line sk-small" style="width: 58%"></div>
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="sk sk-movie" aria-hidden="true">
+    <div class="sk-block sk-back"></div>
+    <div class="movie-layout">
+      <div class="movie-aside">
+        <div class="movie-head">
+          <div class="sk-block movie-poster"></div>
+          <div>
+            <div class="sk-block sk-line sk-h1" style="width: 80%"></div>
+            <div class="sk-block sk-line sk-h1" style="width: 50%"></div>
+            <div class="sk-block sk-line sk-small" style="width: 70%"></div>
+            <div class="sk-block sk-line sk-small" style="width: 85%"></div>
+          </div>
+        </div>
+        <div class="overview">
+          <div class="sk-block sk-line" style="width: 100%"></div>
+          <div class="sk-block sk-line" style="width: 94%"></div>
+          <div class="sk-block sk-line" style="width: 60%"></div>
+        </div>
+      </div>
+      <div class="movie-shows">
+        <div class="shows-head">
+          <div><div class="sk-block sk-h2"></div><div class="sk-block sk-line sk-small" style="width: 9rem"></div></div>
+          <div class="sk-block sk-button"></div>
+        </div>
+        <div class="toolbar"><div class="sk-block sk-segmented"></div><span class="spacer"></span><div class="sk-block sk-button sk-button-sm"></div></div>
+        <div class="day">
+          <div class="day-head"><div class="sk-block sk-line" style="width: 11rem"></div></div>
+          {% for i in range(3) %}
+          <div class="show">
+            <div class="show-time"><div class="sk-block sk-time"></div></div>
+            <div class="show-info"><div class="sk-block sk-line" style="width: 9rem"></div></div>
+            <div class="show-seats">{{ wave() }}<div class="sk-block sk-line" style="width: 4rem"></div></div>
+            <div class="show-book"><div class="sk-block sk-book"></div></div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// Fetch the real page and swap it in. On an expired Authelia session (a
+// redirect or 401 instead of HTML) fall back to a normal page load, which
+// the shell skips (?direct=1), so the login flow works as before.
+(function () {
+  const box = document.getElementById('sk-message');
+  const title = document.getElementById('sk-message-title');
+  const text = document.getElementById('sk-message-text');
+  const retry = document.getElementById('sk-retry');
+
+  function message(t, body, canRetry) {
+    title.textContent = t;
+    text.textContent = body;
+    retry.hidden = !canRetry;
+    box.hidden = false;
+  }
+
+  function loadDirectly() {
+    const url = new URL(location.href);
+    url.searchParams.set('direct', '1');
+    location.replace(url);
+  }
+
+  async function load() {
+    box.hidden = true;
+    document.documentElement.classList.remove('sk-failed');
+    const slow = setTimeout(() => message(
+      'Still loading',
+      'The connection to your server is slower than usual.',
+      false,
+    ), 8000);
+    let resp;
+    try {
+      resp = await fetch(location.href, {
+        credentials: 'same-origin',
+        redirect: 'manual',
+        headers: { Accept: 'text/html' },
+      });
+    } catch (e) {
+      clearTimeout(slow);
+      document.documentElement.classList.add('sk-failed');
+      message("Can't reach cinematix", 'Check your internet connection, then try again.', true);
+      return;
+    }
+    clearTimeout(slow);
+    if (resp.type === 'opaqueredirect' || !(resp.headers.get('content-type') || '').includes('text/html')) {
+      loadDirectly();
+      return;
+    }
+    const html = await resp.text();
+    document.open();
+    document.write(html);
+    document.close();
+  }
+
+  retry.addEventListener('click', load);
+  load();
+})();
+</script>
+</body>
+</html>

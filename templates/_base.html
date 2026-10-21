@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+{% include "_head.html" %}
+<title>{% block title %}cinematix{% endblock %}</title>
+</head>
+<body class="{% block body_class %}{% endblock %}">
+{% include "_topbar.html" %}
+
+  {% include "_global_settings_modal.html" %}
+
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+
+{% include "_global_settings_script.html" %}
+<script>
+// --- Instant loading screen. sw.js answers page loads with a cached
+// shell (shell.html) that paints immediately and then swaps in the real
+// page. In-app refreshes add ?direct=1 to skip the shell, so the current
+// page stays on screen until the new one is ready instead of flashing
+// the loading screen; the parameter is removed from the address bar here.
+(function () {
+  const url = new URL(location.href);
+  if (url.searchParams.has('direct')) {
+    url.searchParams.delete('direct');
+    history.replaceState(history.state, '', url);
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('{{ url_for("service_worker") }}').catch(() => {});
+  }
+})();
+function cxReload() {
+  const url = new URL(location.href);
+  url.searchParams.set('direct', '1');
+  location.replace(url);
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

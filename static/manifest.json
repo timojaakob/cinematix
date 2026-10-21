@@ -1,0 +1,13 @@
+{
+  "name": "cinematix",
+  "short_name": "cinematix",
+  "description": "Showtime and ticket alerts for Cinema City Flora",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e1116",
+  "theme_color": "#0e1116",
+  "icons": [
+    { "src": "/static/logo.png", "sizes": "203x203", "type": "image/png", "purpose": "any" }
+  ]
+}

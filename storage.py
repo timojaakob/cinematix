@@ -56,6 +56,8 @@ DEFAULT_SETTINGS = {
     "notify_on_start_priority": "low",
     "notify_on_new_showtime": True,
     "notify_on_new_showtime_priority": "urgent",
+    "notify_on_more_seats": True,
+    "notify_on_more_seats_priority": "urgent",
     "default_check_interval_seconds": DEFAULT_CHECK_INTERVAL_SECONDS,
     "default_view": "list",
 }

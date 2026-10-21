@@ -9,10 +9,10 @@ only bind this to a LAN-only port.
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
-from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, url_for
 
 import storage
 
@@ -23,6 +23,7 @@ SCRAPER_CONTROL_URL = os.environ.get("SCRAPER_CONTROL_URL", "http://localhost:50
 
 # (seconds, label) options for the per-movie check-frequency dropdown.
 CHECK_INTERVAL_OPTIONS = [
+    (60, "Every minute"),
     (120, "Every 2 minutes"),
     (300, "Every 5 minutes"),
     (600, "Every 10 minutes"),
@@ -37,6 +38,31 @@ CHECK_INTERVAL_OPTIONS = [
 ]
 
 app = Flask(__name__)
+# Static URLs carry a ?v=<mtime> cache-buster (see asset()), so browsers can
+# keep them for a year and still pick up a new deploy immediately.
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 31536000
+
+# A showtime first seen within this window gets a "New" badge.
+NEW_SHOWTIME_WINDOW = timedelta(hours=24)
+
+
+@app.context_processor
+def template_helpers():
+    def asset(filename: str) -> str:
+        try:
+            version = int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+        except OSError:
+            version = 0
+        return url_for("static", filename=filename, v=version)
+
+    return {"asset": asset, "interval_labels": dict(CHECK_INTERVAL_OPTIONS)}
+
+
+def is_new_showtime(match: dict, now: datetime) -> bool:
+    try:
+        return now - datetime.fromisoformat(match.get("fetched_at") or "") < NEW_SHOWTIME_WINDOW
+    except ValueError:
+        return False
 
 
 def sanitize_required_formats(values: list[str]) -> list[str]:
@@ -195,16 +221,30 @@ def index():
     for m in storage.load_results()["matches"]:
         matches_by_movie.setdefault(m["movie_id"], []).append(m)
 
+    now = datetime.now()
+    now_s = now.isoformat(timespec="seconds")
     movies = []
     for movie in config["movies"]:
         movie_matches = matches_by_movie.get(movie["id"], [])
-        open_matches = [m for m in movie_matches if not m.get("sold_out") and m.get("availability") is not None]
+        upcoming = [m for m in movie_matches if (m.get("sale_start") or "") > now_s]
+        # Same "displays as 0%" rule as the movie page's sold-out check.
+        open_matches = [
+            m for m in movie_matches
+            if m not in upcoming
+            and not m.get("sold_out") and m.get("availability") is not None and m["availability"] >= 0.005
+        ]
+        next_sale_start = min((m["sale_start"] for m in upcoming), default=None)
         best_availability = max((m["availability"] for m in open_matches), default=None)
         showtime_count = len(movie_matches)
         movies.append(
             {
                 **movie,
                 "showtime_count": showtime_count,
+                "open_count": len(open_matches),
+                "upcoming_count": len(upcoming),
+                "next_sale_start": datetime.fromisoformat(next_sale_start) if next_sale_start else None,
+                "new_count": sum(1 for m in open_matches if is_new_showtime(m, now)),
+                "best_availability": best_availability,
                 "status_tier": card_status_tier(showtime_count, best_availability),
             }
         )
@@ -221,6 +261,23 @@ def index():
         # history (storage.add_movie() overwrites by id) - see movie-search.
         existing_tmdb_ids=[m["tmdb_id"] for m in config["movies"] if m.get("tmdb_id")],
     )
+
+
+@app.route("/sw.js", methods=["GET"])
+def service_worker():
+    """Served from the root (not /static/) so its scope covers every page.
+    no-cache: browsers must revalidate it, so a new deploy takes effect on
+    the next visit."""
+    resp = send_from_directory(app.static_folder, "sw.js", max_age=0)
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/shell", methods=["GET"])
+def shell():
+    """Loading placeholder that sw.js caches and shows instantly when the
+    app opens; it contains no data, only the page frame (see shell.html)."""
+    return render_template("shell.html")
 
 
 @app.route("/api/search", methods=["GET"])
@@ -371,6 +428,10 @@ def update_global_settings():
             "notify_on_new_showtime": "notify_on_new_showtime" in request.form,
             "notify_on_new_showtime_priority": sanitize_ntfy_priority(
                 request.form.get("notify_on_new_showtime_priority", ""), "urgent"
+            ),
+            "notify_on_more_seats": "notify_on_more_seats" in request.form,
+            "notify_on_more_seats_priority": sanitize_ntfy_priority(
+                request.form.get("notify_on_more_seats_priority", ""), "urgent"
             ),
             "default_check_interval_seconds": default_check_interval_seconds,
             "default_view": sanitize_default_view(request.form.get("default_view", ""), "list"),

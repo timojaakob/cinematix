@@ -1,524 +1,195 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-<title>{{ movie.title }} — cinematix</title>
-<script>
-// Resolve the theme before first paint so there's no flash of the wrong
-// mode: an explicit choice from the settings switch wins, otherwise fall
-// back to the OS-level preference.
-(function () {
-  var stored = localStorage.getItem('cinemacity-theme');
-  var theme = (stored === 'light' || stored === 'dark')
-    ? stored
-    : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-  document.documentElement.dataset.theme = theme;
-})();
-</script>
-<style>
-  :root {
-    --bg: #14120f;
-    --text: #eeece8;
-    --text-secondary: #ccc8c0;
-    --text-muted: #9c968a;
-    --text-dim: #79736a;
-    --panel-bg: #1c1a16;
-    --card-bg: #181613;
-    --border: #2e2a24;
-    --input-bg: #100e0c;
-    --input-border: #3a352d;
-    --hover-bg: #2a2620;
-    color-scheme: dark;
+{% extends "_base.html" %}
 
-    /* Brand accent: always exactly the logo color, unchanged between
-       themes - reserved for primary actions only (buttons, Book).
-       Near-black label text clears AA against it in both themes (6.6:1),
-       so on-accent doesn't need to vary either; only the hover shade
-       shifts, since a hover state has to differ from rest by definition.
-       Everything structural (links, hovers, selected states) lives on
-       --secondary/--link instead, orange's complement, so the accent
-       isn't spread thin across the whole UI. */
-    --accent: #f5821e;
-    --accent-hover: #e06e0a;
-    --accent-rgb: 245, 130, 30;
-    --on-accent: #211a10;
+{% block title %}{{ movie.title }} — cinematix{% endblock %}
 
-    --secondary: #257e7b;
-    --secondary-hover: #2f9995;
-    --link: #4dcbc7;
-    --link-hover: #7fe0dc;
-
-    --avail: #7fbf7f;
-    --rating: #e0b040;
-    --danger: #e06a6a;
-    --danger-rgb: 224, 106, 106;
-    --warning: #d9a441;
-    --warning-bg: rgba(224, 176, 64, 0.12);
-    --warning-border: rgba(224, 176, 64, 0.35);
-
-    /* Bumps every rem-based size across the page in one place, rather than
-       hand-tuning dozens of individual font-size rules. */
-    font-size: 18px;
-  }
-  :root[data-theme="light"] {
-    --bg: #f7f5f1;
-    --text: #1c1a16;
-    --text-secondary: #3d392f;
-    --text-muted: #736d5f;
-    --text-dim: #948d7c;
-    --panel-bg: #fffefc;
-    --card-bg: #fbfaf7;
-    --border: #e6e1d8;
-    --input-bg: #ffffff;
-    --input-border: #d8d2c6;
-    --hover-bg: #efebe3;
-    color-scheme: light;
-
-    /* --accent/--accent-hover/--accent-rgb/--on-accent aren't redefined
-       here - the brand color stays exactly --F5821E in both themes, so
-       there's nothing to override. A saturated color tuned to pop on a
-       dark ground looks flat reused on white, though, so the secondary
-       teal still gets its own light-mode value: one richer shade that
-       works as both link text and fill, rather than the darker,
-       duller-looking clone a naive per-theme darken would produce. */
-    --secondary: #1f7a77;
-    --secondary-hover: #185f5c;
-    --link: #1f7a77;
-    --link-hover: #185f5c;
-
-    --avail: #2f7d3f;
-    --rating: #f5ab00;
-    --danger: #b33a3a;
-    --danger-rgb: 179, 58, 58;
-    --warning: #8a6414;
-    --warning-bg: rgba(138, 100, 20, 0.10);
-    --warning-border: rgba(138, 100, 20, 0.35);
-  }
-  /* Self-hosted (not a Google Fonts CDN link) so the app keeps working
-     fully offline/LAN-only - just the one weight the wordmark needs. */
-  @font-face {
-    font-family: 'Elms Sans';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('{{ url_for("static", filename="elms-sans-bold.woff2") }}') format('woff2');
-  }
-  html, body { height: 100%; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    display: flex;
-    flex-direction: column;
-    /* The header lives outside the scrolling area (below) so its own width
-       is never affected by whether that area's content is tall enough to
-       need a scrollbar - otherwise the header's right edge would land in a
-       different place on a short page than on a tall one. */
-    overflow: hidden;
-  }
-  /* Scrolls independently of .brand - see the .body overflow note above. */
-  .scroll-area {
-    flex: 1 1 auto;
-    overflow-y: auto;
-  }
-  .page {
-    max-width: 1500px;
-    margin: 0 auto;
-    padding: 1.75rem 2rem 3rem;
-    box-sizing: border-box;
-  }
-  .brand {
-    display: flex; align-items: center; gap: 0.6rem;
-    padding: 1rem 2rem;
-    background: var(--panel-bg);
-    border-bottom: 1px solid var(--border);
-    box-sizing: border-box;
-    flex: 0 0 auto;
-  }
-  /* Baseline-aligned with the wordmark, then nudged down a couple px -
-     sitting exactly on the baseline reads as slightly too high next to
-     text, since a hard-edged square optically outweighs a letterform. */
-  .brand img.logo { width: 54px; height: 54px; border-radius: 6px; position: relative; top: 3px; }
-  .brand .icon-btn { margin-left: auto; }
-  .brand-link { display: flex; align-items: baseline; gap: 0.6rem; color: inherit; text-decoration: none; }
-  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
-  .brand h1 {
-    font-family: 'Elms Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-size: 2.2rem;
-    margin: 0;
-  }
-  a.back {
-    display: inline-flex; align-items: center; gap: 0.35rem;
-    color: var(--text-secondary); text-decoration: none; font-size: 0.85rem;
-    border: 1px solid var(--input-border); border-radius: 999px;
-    padding: 0.3rem 0.8rem 0.3rem 0.6rem; margin-bottom: 0.5rem;
-  }
-  a.back svg { width: 14px; height: 14px; flex-shrink: 0; }
-  a.back:hover { border-color: var(--secondary); color: var(--text); background: var(--hover-bg); }
-  .subtitle { color: var(--text-muted); font-size: 0.85rem; margin: 0.5rem 0 1.5rem; }
-  section {
-    background: var(--panel-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
-    margin-bottom: 1.5rem;
-  }
-  h2 { font-size: 1rem; margin-top: 0; color: var(--text-secondary); }
-  .header { display: flex; gap: 1.25rem; }
-  .header img.poster { width: 160px; border-radius: 8px; flex-shrink: 0; }
-  .header .poster-placeholder {
-    width: 160px; height: 240px; border-radius: 8px; background: var(--hover-bg);
-    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--text-dim); font-size: 0.75rem; text-align: center; padding: 0.5rem; box-sizing: border-box;
-  }
-  .header-info { flex: 1; min-width: 0; }
-  .header-title-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
-  .header h1 { font-size: 1.3rem; margin: 0 0 0.3rem; }
-  .header .meta { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.6rem; }
-  .header .meta .rating { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--rating); font-weight: 700; }
-  .header .meta .rating svg { width: 0.8em; height: 0.8em; flex-shrink: 0; }
-  /* Brighter gold reads great on the dark panel as-is; on white it needs a
-     hairline shadow to stay crisp at this lightness rather than washing out. */
-  /* Bright gold needs definition against white; dark mode's value already
-     reads clearly against the near-black panel and gets no outline. A
-     solid, near-opaque grey (not a translucent black) avoids the outline
-     blending into a brownish tint against the gold fill. Text and the star
-     icon get matching stroke widths so neither looks thicker than the other. */
-  :root[data-theme="light"] .header .meta .rating { -webkit-text-stroke: 0.3px #3a3a3a; }
-  :root[data-theme="light"] .header .meta .rating svg { stroke: #3a3a3a; stroke-width: 0.55; }
-  .header .overview { font-size: 0.88rem; line-height: 1.5; color: var(--text-secondary); }
-  .external-links { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
-  .ext-link {
-    display: inline-flex; align-items: center; gap: 0.3rem;
-    color: var(--link); text-decoration: none; font-size: 0.8rem;
-    border: 1px solid var(--input-border); border-radius: 5px; padding: 0.2rem 0.6rem;
-  }
-  .ext-link svg { width: 12px; height: 12px; flex-shrink: 0; }
-  .ext-link:hover { border-color: var(--secondary); background: var(--hover-bg); color: var(--text); }
-  .icon-btn.icon-only { padding: 0.4rem; flex-shrink: 0; }
-  .icon-btn.icon-only svg { width: 17px; height: 17px; }
-  .icon-btn.icon-only.icon-btn-sm { padding: 0.3rem; }
-  .icon-btn.icon-only.icon-btn-sm svg { width: 14px; height: 14px; }
-  .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-    align-items: center; justify-content: center; z-index: 100; padding: 1rem;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal {
-    background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px;
-    padding: 1.1rem 1.4rem 1.4rem; width: 100%; max-width: 420px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-    max-height: 85vh; overflow-y: auto; box-sizing: border-box;
-  }
-  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-  .modal-header h2 { margin: 0; font-size: 1rem; color: var(--text-secondary); }
-  .modal-close {
-    background: transparent; border: none; color: var(--text-muted); font-size: 1.2rem; line-height: 1;
-    padding: 0.2rem 0.5rem; border-radius: 5px; cursor: pointer;
-  }
-  .modal-close:hover { color: var(--text); background: var(--hover-bg); }
-  .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
-  .remove-movie-control { display: flex; align-items: center; gap: 0.6rem; }
-  .remove-movie-btn { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
-  .remove-movie-btn:hover { background: rgba(var(--danger-rgb), 0.14); border-color: var(--danger); }
-  .remove-movie-control.confirming .remove-movie-btn { background: #b53c3c; color: #fff; border-color: #b53c3c; }
-  .remove-movie-control.confirming .remove-movie-btn:hover { background: #c94a4a; }
-  .remove-movie-cancel-btn {
-    background: transparent; border: none; color: var(--text-muted); font-size: 0.78rem;
-    padding: 0; cursor: pointer; text-decoration: underline;
-  }
-  .remove-movie-cancel-btn:hover { background: transparent; color: var(--text); }
-  .settings-form { display: flex; flex-direction: column; align-items: flex-start; gap: 0.85rem; }
-  .setting-row { display: flex; gap: 0.5rem; align-items: center; }
-  .setting-row label { font-size: 0.8rem; color: var(--text-muted); }
-  .setting-row input[type="text"], .setting-row select {
-    background: var(--input-bg); color: var(--text); border: 1px solid var(--input-border); border-radius: 6px;
-    padding: 0.4rem 0.6rem; font-size: 0.85rem;
-  }
-  .setting-row input[type="text"] { width: 200px; }
-  .setting-row select { cursor: pointer; }
-  .format-setting-row { align-items: flex-start; }
-  .format-checkboxes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-  .setting-hint { margin: -0.5rem 0 0; font-size: 0.75rem; color: var(--text-dim); }
-  .setting-hint.error { color: var(--danger); }
-  .setting-hint.success { color: var(--avail); }
-  .setting-group { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; }
-  .notify-case { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; width: 100%; }
-  .notify-case select { flex-shrink: 0; }
-  .input-with-toggle { display: flex; gap: 0.4rem; align-items: center; width: 100%; }
-  .input-with-toggle input { flex: 1; min-width: 0; }
-  .input-with-toggle button { flex-shrink: 0; }
-
-  /* theme switch */
-  .theme-switch { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); }
-  .theme-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .theme-switch-track {
-    position: relative; width: 40px; height: 22px; border-radius: 11px;
-    background: var(--input-border); transition: background 0.2s ease; flex-shrink: 0;
-  }
-  .theme-switch-thumb {
-    position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
-    background: var(--panel-bg); transition: transform 0.2s ease;
-  }
-  .theme-switch input:checked + .theme-switch-track { background: var(--secondary); }
-  .theme-switch input:checked + .theme-switch-track .theme-switch-thumb { transform: translateX(18px); }
-
-  /* Global settings modal: wider than the other dialogs and laid out
-     label-left/value-right per row, with any hint paragraph wrapping onto
-     its own full-width line below (via flex-basis: 100%) rather than being
-     squeezed into the value column. */
-  #global-settings-overlay .modal { max-width: 520px; }
-  #global-settings-overlay .setting-row {
-    flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between;
-    column-gap: 1.5rem; row-gap: 0.4rem; margin-bottom: 1.1rem;
-  }
-  #global-settings-overlay .setting-row:last-child { margin-bottom: 0; }
-  #global-settings-overlay .setting-row > label:first-child { flex: 0 0 auto; white-space: nowrap; }
-  #global-settings-overlay .setting-row select,
-  #global-settings-overlay .setting-row input[type="text"],
-  #global-settings-overlay .setting-row input[type="password"] {
-    width: auto;
-  }
-  #global-settings-overlay .setting-row select { cursor: pointer; }
-  #global-settings-overlay .setting-row .input-with-toggle,
-  #global-settings-overlay .setting-row .setting-group {
-    flex: 1 1 auto; width: auto; max-width: 320px;
-  }
-  #global-settings-overlay .setting-row .setting-hint { flex-basis: 100%; }
-  #global-settings-overlay .modal-actions { justify-content: flex-end; }
-  .settings-advanced summary {
-    cursor: pointer; font-size: 0.82rem; color: var(--link); list-style: none; user-select: none;
-  }
-  .settings-advanced summary::-webkit-details-marker { display: none; }
-  .settings-advanced summary::before { content: '▸ '; }
-  .settings-advanced[open] summary::before { content: '▾ '; }
-  .settings-advanced .setting-row { margin-top: 0.6rem; }
-  button {
-    background: var(--accent); color: var(--on-accent); border: none; border-radius: 6px;
-    padding: 0.4rem 1rem; font-size: 0.85rem; cursor: pointer;
-  }
-  /* :where() keeps this at zero specificity, so every other button variant's
-     own :hover rule (remove-movie-btn, modal-close, reset-btn, ...) naturally
-     wins without needing a growing list of :not() exclusions here. */
-  :where(button):hover { background: var(--accent-hover); }
-  /* Only the actual filled accent buttons get the tinted lift in light
-     mode - listed explicitly rather than "every button except X" so a
-     non-accent button (filters toggle, calendar arrows, settings gears,
-     remove controls, ...) can never inherit an orange glow it didn't ask
-     for. */
-  :root[data-theme="light"] #settings-apply-btn:not(:disabled),
-  :root[data-theme="light"] #check-now-btn:not(:disabled),
-  :root[data-theme="light"] #ntfy-test-btn:not(:disabled),
-  :root[data-theme="light"] #global-settings-apply-btn:not(:disabled),
-  :root[data-theme="light"] a.book {
-    box-shadow: 0 6px 16px -4px rgba(var(--accent-rgb), 0.45);
-  }
-  #check-now-btn { font-weight: 700; font-size: 0.95rem; padding: 0.5rem 1.2rem; }
-  button:disabled, button:disabled:hover { background: #555; cursor: default; }
-  .filters-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
-  .icon-btn {
-    position: relative;
-    display: inline-flex; align-items: center; gap: 0.45rem;
-    background: transparent; color: var(--text-secondary); border: 1px solid var(--input-border); border-radius: 6px;
-    padding: 0.35rem 0.75rem; font-size: 0.82rem; cursor: pointer;
-  }
-  .icon-btn svg { width: 14px; height: 14px; }
-  .icon-btn:hover { background: transparent; border-color: var(--secondary); color: var(--text); }
-  .icon-btn[aria-expanded="true"] { background: var(--secondary); border-color: var(--secondary); color: white; }
-  .filters-badge {
-    position: absolute; top: -6px; right: -6px;
-    min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px;
-    background: #c0392b; color: white; border: 2px solid var(--bg);
-    font-size: 0.62rem; font-weight: 600; line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .filters-badge[hidden] { display: none; }
-  .icon-btn[aria-expanded="true"] .filters-badge { border-color: var(--secondary); }
-  .filters-panel {
-    display: none; flex-direction: column; gap: 0.75rem;
-    background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px;
-    padding: 0.85rem 1rem; margin-bottom: 0.9rem;
-  }
-  .filters-panel.open { display: flex; }
-  .filter-group { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
-  .filter-label { font-size: 0.78rem; color: var(--text-muted); margin-right: 0.25rem; }
-  .filter-sep { color: var(--text-dim); }
-  .time-combo { position: relative; display: inline-flex; align-items: stretch; }
-  .time-combo input.time-input {
-    background: var(--input-bg); color: var(--text); border: 1px solid var(--input-border); border-right: none;
-    border-radius: 5px 0 0 5px; padding: 0.25rem 0.4rem; font-size: 0.82rem; width: 4.5rem;
-  }
-  .time-combo-toggle {
-    background: var(--input-bg); color: var(--text-muted); border: 1px solid var(--input-border); border-radius: 0 5px 5px 0;
-    padding: 0.25rem 0.4rem; font-size: 0.7rem; cursor: pointer; line-height: 1;
-  }
-  .time-combo input.time-input.invalid { border-color: var(--danger); }
-  .time-combo input.time-input.invalid + .time-combo-toggle { border-color: var(--danger); }
-  .time-combo-toggle:hover { background: var(--input-bg); color: var(--text); border-color: var(--secondary); }
-  .time-combo-list {
-    display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
-    background: var(--panel-bg); border: 1px solid var(--input-border); border-radius: 6px; min-width: 100%;
-    max-height: 220px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  }
-  .time-combo-list.open { display: block; }
-  .time-combo-option { padding: 0.35rem 0.6rem; font-size: 0.82rem; color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
-  .time-combo-option:hover { background: var(--hover-bg); color: var(--text); }
-  .reset-btn {
-    background: transparent; border: none; color: var(--link); font-size: 0.78rem;
-    padding: 0; cursor: pointer; text-decoration: underline;
-  }
-  .reset-btn:hover { background: transparent; color: var(--link-hover); }
-  label.checkbox { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--text-secondary); cursor: pointer; }
-  label.day-toggle {
-    display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);
-    cursor: pointer; border: 1px solid var(--input-border); border-radius: 5px; padding: 0.2rem 0.5rem;
-  }
-  label.day-toggle:has(input:checked) { border-color: var(--secondary); color: var(--text); }
-  .table-scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
-  th { color: var(--text-muted); font-weight: 500; }
-  th[data-sort-key] { cursor: pointer; user-select: none; white-space: nowrap; }
-  th[data-sort-key]:hover { color: var(--text-secondary); }
-  th[data-sort-key]:focus-visible { outline: 2px solid var(--secondary); outline-offset: -2px; }
-  th[data-sort-key]::after { content: '⇅'; margin-left: 0.3rem; font-size: 0.85em; color: var(--text-dim); opacity: 0.7; }
-  th[data-sort-key].sort-active::after { content: none; }
-  th[data-sort-key] .sort-arrow { color: var(--link); margin-left: 0.25rem; }
-  .lang-tags { display: flex; align-items: center; gap: 0.6rem; }
-  .lang-tag {
-    display: flex; align-items: center; gap: 0.3rem;
-    font-size: 0.82rem; color: var(--text-secondary); line-height: 1;
-  }
-  .lang-tag svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--text-muted); }
-  .subtitle-lang { color: var(--text-muted); font-size: 0.78rem; }
-  .avail-pill {
-    display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
-    font-size: 0.78rem; font-weight: 600; line-height: 1.3; white-space: nowrap;
-  }
-  a.book {
-    display: inline-flex; align-items: center; gap: 0.3rem;
-    background: var(--accent); color: var(--on-accent); text-decoration: none; border: none;
-    font-weight: 600; border-radius: 999px; padding: 0.2rem 0.7rem; white-space: nowrap;
-  }
-  a.book svg { width: 12px; height: 12px; flex-shrink: 0; }
-  a.book:hover { background: var(--accent-hover); }
-  .empty { color: var(--text-dim); font-style: italic; padding: 0.5rem 0; }
-  .section-head { display: flex; align-items: center; justify-content: space-between; }
-  #check-now-status { font-size: 0.78rem; color: var(--text-muted); margin-left: 0.6rem; }
-  .view-toggle { display: inline-flex; border: 1px solid var(--input-border); border-radius: 6px; overflow: hidden; }
-  .view-toggle-btn { border: none; border-radius: 0; }
-  .view-toggle-btn + .view-toggle-btn { border-left: 1px solid var(--input-border); }
-  .view-toggle-btn.active { background: var(--secondary); color: white; }
-  .view-toggle-btn.active:hover { background: var(--secondary-hover); }
-  .calendar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
-  .calendar-month-label { font-size: 0.95rem; font-weight: 600; color: var(--text); }
-  .calendar-legend { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.75rem; font-size: 0.75rem; color: var(--text-muted); }
-  .calendar-legend-bar { width: 90px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, hsl(0,40%,40%), hsl(60,40%,40%), hsl(120,40%,40%)); }
-  .calendar-legend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; background: hsl(0, 40%, 40%); border: 1px solid hsl(0, 45%, 25%); margin-left: 0.5rem; }
-  :root[data-theme="light"] .calendar-legend-bar { background: linear-gradient(90deg, hsl(0,55%,48%), hsl(60,55%,48%), hsl(120,55%,48%)); }
-  :root[data-theme="light"] .calendar-legend-swatch { background: hsl(0, 55%, 48%); border-color: hsl(0, 60%, 30%); }
-  .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-  .calendar-weekday { font-size: 0.72rem; color: var(--text-dim); text-align: center; padding-bottom: 0.3rem; }
-  .calendar-day {
-    position: relative; min-height: 56px; border-radius: 6px; padding: 0.35rem 0.4rem;
-    display: flex; flex-direction: column; justify-content: space-between;
-    border: 1px solid transparent; box-sizing: border-box; color: var(--text);
-  }
-  .calendar-day.empty { visibility: hidden; }
-  .calendar-day.no-shows { background: var(--card-bg); border: 1px dashed var(--hover-bg); }
-  .calendar-day.sold-out-day { background: hsl(0, 40%, 40%); color: #fff; }
-  :root[data-theme="light"] .calendar-day.sold-out-day { background: hsl(0, 55%, 48%); }
-  .calendar-day:not(.empty):not(.no-shows) { cursor: pointer; }
-  .calendar-day.today { border-color: var(--secondary); }
-  .calendar-day.selected { box-shadow: 0 0 0 2px #fff inset; }
-  .calendar-day .day-num { font-size: 0.8rem; font-weight: 600; color: inherit; }
-  .calendar-day.no-shows .day-num { color: var(--text-dim); font-weight: 400; }
-  .calendar-day .day-count { font-size: 0.66rem; color: inherit; opacity: 0.75; }
-  .agenda-panel { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.9rem; }
-  .agenda-list { display: flex; flex-direction: column; gap: 0.5rem; }
-  .agenda-item {
-    display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem;
-    border-radius: 6px; border-left: 4px solid; background: var(--card-bg); font-size: 0.85rem;
-    color: var(--text);
-  }
-  .agenda-time { font-weight: 600; color: inherit; width: 3.2rem; flex-shrink: 0; }
-  .agenda-meta { flex: 1; color: inherit; opacity: 0.85; }
-  .agenda-avail { color: inherit; opacity: 0.85; font-size: 0.8rem; white-space: nowrap; }
-</style>
-</head>
-<body>
-  <div class="brand">
-    <a class="brand-link" href="{{ url_for('index') }}">
-      <img class="logo" src="{{ url_for('static', filename='logo.png') }}" alt="">
-      <h1>cinematix</h1>
-    </a>
-    <button id="global-settings-btn" type="button" class="icon-btn icon-only" aria-label="Settings" aria-haspopup="dialog" aria-controls="global-settings-overlay">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <line x1="4" y1="6" x2="20" y2="6"></line>
-        <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"></circle>
-        <line x1="4" y1="12" x2="20" y2="12"></line>
-        <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"></circle>
-        <line x1="4" y1="18" x2="20" y2="18"></line>
-        <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"></circle>
-      </svg>
-    </button>
-  </div>
-
-  {% include "_global_settings_modal.html" %}
-
-  <div class="scroll-area"><div class="page">
-
+{% block content %}
   <a class="back" href="{{ url_for('index') }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
-    Monitored movies
+    All movies
   </a>
 
-  <section>
-    <div class="header">
-      {% if movie.poster_url %}
-        <img class="poster" src="{{ movie.poster_url }}" alt="">
-      {% else %}
-        <div class="poster-placeholder">{{ movie.title }}</div>
+  <div class="movie-layout">
+    <aside class="movie-aside">
+      <div class="movie-head">
+        {% if movie.poster_url %}
+          <img class="movie-poster" src="{{ movie.poster_url }}" alt="" width="342" height="513" decoding="async">
+        {% else %}
+          <div class="movie-poster-ph" aria-hidden="true"></div>
+        {% endif %}
+        <div>
+          <div class="movie-title-row">
+            <h1 class="movie-title">{{ movie.title }}</h1>
+            <button id="settings-btn" type="button" class="icon-btn" aria-label="Movie settings" aria-haspopup="dialog" aria-controls="settings-overlay">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 13.09H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="movie-meta">
+            {% if movie.rating %}<span class="rating"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>{{ movie.rating }}</span>{% endif %}
+            {% if movie.runtime %}<span>{{ movie.runtime }} min</span>{% endif %}
+            {% if movie.release_date %}<span>{{ movie.release_date | humandate }}</span>{% endif %}
+          </div>
+          <p class="movie-watch">
+            {% if movie.check_interval_seconds is none %}
+              Checking is off.
+            {% else %}
+              Watching for {{ (movie.required_formats or ['no formats']) | join(', ') }}, {{ interval_labels.get(movie.check_interval_seconds, 'every ' ~ movie.check_interval_seconds ~ ' s') | lower }}.
+            {% endif %}
+          </p>
+        </div>
+      </div>
+      {% if movie.overview %}
+      <div class="overview clamped" id="overview">
+        <p>{{ movie.overview }}</p>
+        <button type="button" class="link-btn" id="overview-toggle" hidden>Read more</button>
+      </div>
       {% endif %}
-      <div class="header-info">
-        <div class="header-title-row">
-          <h1>{{ movie.title }}</h1>
-          <button id="settings-btn" type="button" class="icon-btn icon-only icon-btn-sm" aria-label="Settings" aria-haspopup="dialog" aria-controls="settings-modal">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 13.09H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-          </button>
+      {% if movie.tmdb_id or movie.imdb_id %}
+      <div class="ext-links">
+        {% if movie.tmdb_id %}<a href="https://www.themoviedb.org/movie/{{ movie.tmdb_id }}" target="_blank" rel="noopener">TMDb <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>{% endif %}
+        {% if movie.imdb_id %}<a href="https://www.imdb.com/title/{{ movie.imdb_id }}/" target="_blank" rel="noopener">IMDb <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>{% endif %}
+      </div>
+      {% endif %}
+    </aside>
+
+    <section class="movie-shows" aria-labelledby="shows-title">
+      <div class="shows-head">
+        <div>
+          <h2 id="shows-title">Showtimes</h2>
+          <div class="checked-line" aria-live="polite">
+            <span id="live-dot" class="live-dot{% if movie.check_interval_seconds is none %} idle{% endif %}" aria-hidden="true"></span>
+            <span id="checked-text">{% if updated_at %}Checked <span id="last-checked">{{ updated_at | relativedate }}</span>{% else %}Not checked yet{% endif %}</span>
+          </div>
         </div>
-        <div class="meta">
-          {% if movie.rating %}<span class="rating"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg> {{ movie.rating }}</span>{% endif %}
-          {% if movie.runtime %}{% if movie.rating %} · {% endif %}{{ movie.runtime }} min{% endif %}
-          {% if movie.release_date %} · {{ movie.release_date | humandate }}{% endif %}
+        <button id="check-now-btn" type="button" class="btn btn-quiet">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+          <span id="check-now-label">Check now</span>
+        </button>
+      </div>
+      <p id="check-now-status" class="hint error" hidden></p>
+
+      {% if matches %}
+      <div class="toolbar">
+        <div class="segmented" role="group" aria-label="Showtimes view">
+          <button type="button" id="view-list-btn" aria-pressed="true">List</button>
+          <button type="button" id="view-calendar-btn" aria-pressed="false">Calendar</button>
         </div>
-        {% if movie.overview %}<div class="overview">{{ movie.overview }}</div>{% endif %}
-        {% if movie.tmdb_id or movie.imdb_id %}
-        <div class="external-links">
-          {% if movie.tmdb_id %}<a class="ext-link" href="https://www.themoviedb.org/movie/{{ movie.tmdb_id }}" target="_blank" rel="noopener">TMDb <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>{% endif %}
-          {% if movie.imdb_id %}<a class="ext-link" href="https://www.imdb.com/title/{{ movie.imdb_id }}/" target="_blank" rel="noopener">IMDb <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>{% endif %}
+        <span class="spacer"></span>
+        <button id="filters-toggle" type="button" class="btn btn-quiet filters-btn" aria-expanded="false" aria-controls="filters-panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          Filters
+          <span id="filters-badge" class="filters-count" hidden></span>
+        </button>
+      </div>
+
+      <div id="filters-panel" class="filters-panel">
+        <div class="field" id="sort-field">
+          <span class="field-label">Sort</span>
+          <div class="segmented" role="group" aria-label="Sort showtimes">
+            <button type="button" data-sort="date" aria-pressed="true">By date</button>
+            <button type="button" data-sort="seats" aria-pressed="false">Most free seats</button>
+          </div>
+        </div>
+        <div class="field field-row">
+          <label class="switch">
+            <input type="checkbox" id="filter-low-avail">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span>Hide showtimes under 30% free</span>
+          </label>
+        </div>
+        <div class="field">
+          <span class="field-label">Starts between</span>
+          <div class="time-range">
+            <input type="time" id="filter-time-from" value="00:00" step="1800" aria-label="Earliest start time">
+            <span aria-hidden="true">and</span>
+            <input type="time" id="filter-time-to" value="23:59" aria-label="Latest start time">
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label">Days</span>
+          <div class="chips">
+            {% for d, label in [(1, 'Mon'), (2, 'Tue'), (3, 'Wed'), (4, 'Thu'), (5, 'Fri'), (6, 'Sat'), (0, 'Sun')] %}
+            <label class="chip"><input type="checkbox" class="filter-weekday" data-day="{{ d }}" checked> {{ label }}</label>
+            {% endfor %}
+          </div>
+        </div>
+        {% if audio_languages|length > 1 %}
+        <div class="field">
+          <span class="field-label">Audio</span>
+          <div class="chips">
+            {% for lang in audio_languages %}
+            <label class="chip"><input type="checkbox" class="filter-audio-language" data-lang="{{ lang }}" checked> {{ lang }}</label>
+            {% endfor %}
+          </div>
         </div>
         {% endif %}
+        {% if format_options|length > 1 %}
+        <div class="field">
+          <span class="field-label">Format</span>
+          <div class="chips">
+            {% for fmt in format_options %}
+            <label class="chip"><input type="checkbox" class="filter-format" data-format="{{ fmt }}" checked> {{ fmt }}</label>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        <button type="button" id="filters-reset" class="link-btn">Reset filters</button>
       </div>
-    </div>
-  </section>
+
+      <div id="list-view"></div>
+
+      <div id="calendar-view" hidden>
+        <div class="cal-head">
+          <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous month">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          </button>
+          <h3 id="cal-month-label" aria-live="polite"></h3>
+          <button type="button" id="cal-next" class="icon-btn" aria-label="Next month">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </button>
+        </div>
+        <div id="calendar-grid" class="cal-grid"></div>
+        <div class="cal-legend" aria-hidden="true">
+          <span><i style="background:var(--good)"></i>50% free or more</span>
+          <span><i style="background:var(--fair)"></i>15–50%</span>
+          <span><i style="background:var(--low)"></i>Under 15%</span>
+          <span><i style="background:var(--sold)"></i>Sold out</span>
+          <span><i style="background:var(--brand)"></i>Booking not open yet</span>
+        </div>
+        <div id="agenda" class="agenda"></div>
+      </div>
+
+      <div id="no-results" class="no-results" hidden>
+        <strong>No showtimes match your filters</strong>
+        <button type="button" class="link-btn" id="no-results-reset">Reset filters</button>
+      </div>
+      {% else %}
+      <div class="no-results">
+        <strong>No showtimes yet</strong>
+        {% if movie.check_interval_seconds is none %}
+          Checking is off for this movie. Turn it on in the movie settings.
+        {% else %}
+          cinematix checks Cinema City Flora {{ interval_labels.get(movie.check_interval_seconds, 'regularly') | lower }}. You get a notification when a showtime appears.
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+  </div>
 
   <div id="settings-overlay" class="modal-overlay">
-    <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div class="modal-header">
-        <h2 id="settings-modal-title">Settings</h2>
-        <button id="settings-close-btn" type="button" class="modal-close" aria-label="Close settings">✕</button>
+        <h2 id="settings-modal-title">{{ movie.title }}</h2>
+        <button id="settings-close-btn" type="button" class="icon-btn" aria-label="Close movie settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </div>
       {% set interval = movie.check_interval_seconds | default(120) %}
-      <form id="settings-form" class="settings-form" method="post" action="{{ url_for('update_settings', movie_id=movie.id) }}">
-        <div class="setting-row">
-          <label for="check_interval">Check frequency</label>
+      <form id="settings-form" method="post" action="{{ url_for('update_settings', movie_id=movie.id) }}">
+        <div class="field field-row">
+          <label class="field-label" for="check_interval">Check</label>
           <select id="check_interval" name="check_interval">
             {% for seconds, label in check_interval_options %}
             <option value="{{ seconds }}" {% if interval == seconds %}selected{% endif %}>{{ label }}</option>
@@ -526,151 +197,46 @@
             <option value="off" {% if interval is none %}selected{% endif %}>Off</option>
           </select>
         </div>
-
-        <div class="setting-row format-setting-row">
-          <label>Formats to check</label>
-          <div class="format-checkboxes">
+        <div class="field">
+          <span class="field-label">Formats to watch for</span>
+          <div class="chips">
             {% for fmt in all_formats %}
-            <label class="day-toggle"><input type="checkbox" name="required_formats" value="{{ fmt }}" {% if fmt in (movie.required_formats or []) %}checked{% endif %}> {{ fmt }}</label>
+            <label class="chip"><input type="checkbox" name="required_formats" value="{{ fmt }}" {% if fmt in (movie.required_formats or []) %}checked{% endif %}> {{ fmt }}</label>
             {% endfor %}
           </div>
+          <p class="hint">Only showtimes in the selected formats are tracked.</p>
         </div>
-        <p class="setting-hint">No formats selected means no showtimes will match.</p>
-
-        <details class="settings-advanced">
+        <details class="advanced field">
           <summary>Match text</summary>
-          <div class="setting-row">
-            <label for="query">Match text</label>
-            <input type="text" id="query" name="query" value="{{ movie.query }}">
-          </div>
-          <p class="setting-hint">The text the scraper matches against the cinema's showtime listings to find this movie. The title usually works fine — only change this if the cinema lists it under a different name. A wrong value can stop it from matching anything.</p>
+          <input type="text" id="query" name="query" value="{{ movie.query }}" aria-describedby="query-hint" autocapitalize="off" spellcheck="false">
+          <p class="hint" id="query-hint">cinematix finds this movie by looking for this text in the cinema's listings. Change it only if Cinema City uses a different title.</p>
         </details>
       </form>
-
       <div class="modal-actions">
-        <div class="remove-movie-control" id="remove-movie-control">
-          <button type="button" id="remove-movie-btn" class="remove-movie-btn">Remove movie</button>
-          <button type="button" id="remove-movie-cancel-btn" class="remove-movie-cancel-btn" hidden>Cancel</button>
-        </div>
+        <button type="button" id="remove-movie-btn" class="btn btn-danger">Stop monitoring</button>
+        <button type="button" id="remove-movie-cancel-btn" class="link-btn" hidden>Cancel</button>
         <form id="remove-movie-form" method="post" action="{{ url_for('remove_movie', movie_id=movie.id) }}" hidden></form>
-        <button id="settings-apply-btn" type="submit" form="settings-form" disabled>Apply changes</button>
+        <button id="settings-apply-btn" type="submit" form="settings-form" class="btn" disabled>Save changes</button>
       </div>
     </div>
   </div>
+{% endblock %}
 
-  <section>
-    <div class="section-head">
-      <h2>Showtimes {% if updated_at %}<span class="subtitle" style="margin:0;">— last checked <span id="last-checked">{{ updated_at | relativedate }}</span></span>{% endif %}</h2>
-      <div>
-        <button id="check-now-btn" type="button">Check now</button>
-        <span id="check-now-status"></span>
-      </div>
-    </div>
-    {% if matches %}
-    <div class="filters-row">
-      <div class="view-toggle" role="group" aria-label="Showtimes view">
-        <button type="button" id="view-list-btn" class="icon-btn view-toggle-btn active" aria-pressed="true">List</button>
-        <button type="button" id="view-calendar-btn" class="icon-btn view-toggle-btn" aria-pressed="false">Calendar</button>
-      </div>
-      <button id="filters-toggle" type="button" class="icon-btn" aria-expanded="false" aria-controls="filters-panel">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polygon points="4 4 20 4 14 12.5 14 20 10 18 10 12.5 4 4"/>
-        </svg>
-        Filters
-        <span id="filters-badge" class="filters-badge" hidden></span>
-      </button>
-    </div>
-    <div id="filters-panel" class="filters-panel">
-      <label class="checkbox"><input type="checkbox" id="filter-low-avail" checked> Hide low availability</label>
-
-      <div class="filter-group">
-        <span class="filter-label">Time range</span>
-        <div class="time-combo">
-          <input type="text" class="time-input" id="filter-time-from" value="00:00"
-                 placeholder="HH:MM" inputmode="numeric" maxlength="5" autocomplete="off">
-          <button type="button" class="time-combo-toggle" data-for="filter-time-from" aria-label="Choose start time">▾</button>
-          <div class="time-combo-list" data-for="filter-time-from"></div>
-        </div>
-        <span class="filter-sep">–</span>
-        <div class="time-combo">
-          <input type="text" class="time-input" id="filter-time-to" value="23:59"
-                 placeholder="HH:MM" inputmode="numeric" maxlength="5" autocomplete="off">
-          <button type="button" class="time-combo-toggle" data-for="filter-time-to" aria-label="Choose end time">▾</button>
-          <div class="time-combo-list" data-for="filter-time-to"></div>
-        </div>
-        <p id="filter-time-hint" class="setting-hint error" style="display:none; margin:0; width:100%;">Enter a valid time (HH:MM) — showing all times.</p>
-      </div>
-
-      <div class="filter-group">
-        <span class="filter-label">Weekdays</span>
-        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="1" checked> Mon</label>
-        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="2" checked> Tue</label>
-        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="3" checked> Wed</label>
-        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="4" checked> Thu</label>
-        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="5" checked> Fri</label>
-        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="6" checked> Sat</label>
-        <label class="day-toggle"><input type="checkbox" class="filter-weekday" data-day="0" checked> Sun</label>
-      </div>
-
-      {% if audio_languages|length > 1 %}
-      <div class="filter-group">
-        <span class="filter-label">Audio</span>
-        {% for lang in audio_languages %}
-        <label class="day-toggle"><input type="checkbox" class="filter-audio-language" data-lang="{{ lang }}" checked> {{ lang }}</label>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      {% if format_options|length > 1 %}
-      <div class="filter-group">
-        <span class="filter-label">Format</span>
-        {% for fmt in format_options %}
-        <label class="day-toggle"><input type="checkbox" class="filter-format" data-format="{{ fmt }}" checked> {{ fmt }}</label>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      <div class="filter-group">
-        <button type="button" id="filters-reset" class="reset-btn">Reset filters</button>
-      </div>
-    </div>
-    {% endif %}
-    <div id="list-view">
-      {% include "_results_table.html" %}
-    </div>
-    {% if matches %}
-    <div id="calendar-view" class="calendar-view" style="display:none;">
-      <div class="calendar-header">
-        <button type="button" id="cal-prev" class="icon-btn icon-only" aria-label="Previous month">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
-        </button>
-        <span id="cal-month-label" class="calendar-month-label"></span>
-        <button type="button" id="cal-next" class="icon-btn icon-only" aria-label="Next month">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
-        </button>
-      </div>
-      <div class="calendar-legend">
-        <span>Availability</span>
-        <span class="calendar-legend-bar"></span>
-        <span>Low → High</span>
-        <span class="calendar-legend-swatch"></span>
-        <span>Sold out</span>
-      </div>
-      <div id="calendar-grid" class="calendar-grid"></div>
-      <div id="agenda-panel" class="agenda-panel">
-        <p class="empty" id="agenda-empty">Select a day to see showtimes.</p>
-        <div id="agenda-list" class="agenda-list" style="display:none;"></div>
-      </div>
-    </div>
-    {% endif %}
-  </section>
-
-  </div></div>
-
-{% include "_global_settings_script.html" %}
-
+{% block scripts %}
 <script>
-// --- Per-movie settings modal ---
+// --- Overview: clamped to 3 lines on phones, "Read more" only if it overflows. ---
+(function () {
+  const overview = document.getElementById('overview');
+  const toggle = document.getElementById('overview-toggle');
+  if (!overview) return;
+  const p = overview.querySelector('p');
+  const update = () => { toggle.hidden = !overview.classList.contains('clamped') || p.scrollHeight <= p.clientHeight + 1; };
+  toggle.addEventListener('click', () => { overview.classList.remove('clamped'); toggle.hidden = true; });
+  update();
+  window.addEventListener('resize', update);
+})();
+
+// --- Per-movie settings sheet ---
 const settingsBtn = document.getElementById('settings-btn');
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
@@ -681,27 +247,21 @@ const settingsFields = Array.from(settingsForm.elements).filter(el => el.name);
 // so a name-keyed map would only remember the last one's initial state.
 const settingsInitial = new Map(settingsFields.map(el => [el, el.type === 'checkbox' ? el.checked : el.value]));
 
-function openSettings() {
-  settingsOverlay.classList.add('open');
-}
-
 function closeSettings() {
   settingsOverlay.classList.remove('open');
+  setRemoveMovieConfirming(false);
 }
 
 function updateApplyState() {
-  const dirty = settingsFields.some(el => {
+  settingsApplyBtn.disabled = !settingsFields.some(el => {
     const current = el.type === 'checkbox' ? el.checked : el.value;
     return current !== settingsInitial.get(el);
   });
-  settingsApplyBtn.disabled = !dirty;
 }
 
-settingsBtn.addEventListener('click', openSettings);
+settingsBtn.addEventListener('click', () => openSheet(settingsOverlay));
 settingsCloseBtn.addEventListener('click', closeSettings);
-settingsOverlay.addEventListener('click', (e) => {
-  if (e.target === settingsOverlay) closeSettings();
-});
+settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) closeSettings(); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) closeSettings();
 });
@@ -710,76 +270,67 @@ for (const el of settingsFields) {
   el.addEventListener('change', updateApplyState);
 }
 
-// --- Remove-movie confirmation: click reveals "Cancel" and turns the
-// button red, a second click actually submits - same inline two-step
-// pattern as removing a movie from the main page's grid, no native
-// confirm() dialog. ---
-const removeMovieControl = document.getElementById('remove-movie-control');
+// --- Stop monitoring: first tap arms the button, second tap removes. ---
 const removeMovieBtn = document.getElementById('remove-movie-btn');
 const removeMovieCancelBtn = document.getElementById('remove-movie-cancel-btn');
 const removeMovieForm = document.getElementById('remove-movie-form');
 
 function setRemoveMovieConfirming(confirming) {
-  removeMovieControl.classList.toggle('confirming', confirming);
+  removeMovieBtn.classList.toggle('confirming', confirming);
   removeMovieCancelBtn.hidden = !confirming;
-  removeMovieBtn.textContent = confirming ? 'Confirm remove?' : 'Remove movie';
+  removeMovieBtn.textContent = confirming ? 'Tap again to remove' : 'Stop monitoring';
 }
-
 removeMovieBtn.addEventListener('click', () => {
-  if (removeMovieControl.classList.contains('confirming')) {
+  if (removeMovieBtn.classList.contains('confirming')) {
     removeMovieForm.submit();
     return;
   }
   setRemoveMovieConfirming(true);
 });
 removeMovieCancelBtn.addEventListener('click', () => setRemoveMovieConfirming(false));
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('#remove-movie-control')) setRemoveMovieConfirming(false);
-});
 
+// --- Check now + live status ---
 const lastUpdatedAt = {{ updated_at | tojson }};
 const movieId = {{ movie.id | tojson }};
 const apiStatusUrl = '{{ url_for("api_status") }}?movie_id=' + encodeURIComponent(movieId);
-const btn = document.getElementById('check-now-btn');
-const status = document.getElementById('check-now-status');
-const btnDefaultText = btn.textContent;
+const checkBtn = document.getElementById('check-now-btn');
+const checkLabel = document.getElementById('check-now-label');
+const checkStatus = document.getElementById('check-now-status');
+const liveDot = document.getElementById('live-dot');
 const lastCheckedEl = document.getElementById('last-checked');
 
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'];
-
-function ordinal(n) {
-  if (n >= 11 && n <= 13) return n + 'th';
-  return n + ({1: 'st', 2: 'nd', 3: 'rd'}[n % 10] || 'th');
-}
-
 function formatRelative(isoStr) {
-  const dt = new Date(isoStr);
-  const seconds = Math.max((Date.now() - dt.getTime()) / 1000, 0);
+  const seconds = Math.max((Date.now() - new Date(isoStr).getTime()) / 1000, 0);
   if (seconds < 30) return 'just now';
   const minutes = Math.floor((seconds + 30) / 60);
   if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
   const hours = Math.floor((seconds + 1800) / 3600);
   if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
   const days = Math.floor((seconds + 43200) / 86400);
-  if (days < 7) return `${days} day${days !== 1 ? 's' : ''} ago`;
-  const hh = String(dt.getHours()).padStart(2, '0');
-  const mm = String(dt.getMinutes()).padStart(2, '0');
-  return `${MONTHS[dt.getMonth()]} ${ordinal(dt.getDate())} ${dt.getFullYear()} ${hh}:${mm}`;
+  return `${days} day${days !== 1 ? 's' : ''} ago`;
 }
-
 if (lastCheckedEl && lastUpdatedAt) {
-  setInterval(() => { lastCheckedEl.textContent = formatRelative(lastUpdatedAt); }, 30000);
+  setInterval(() => { lastCheckedEl.textContent = formatRelative(lastUpdatedAt); }, 15000);
 }
 
 function setChecking(isChecking) {
-  btn.disabled = isChecking;
-  btn.textContent = isChecking ? 'Checking…' : btnDefaultText;
+  checkBtn.disabled = isChecking;
+  checkBtn.classList.toggle('checking', isChecking);
+  checkLabel.textContent = isChecking ? 'Checking…' : 'Check now';
+  liveDot.classList.toggle('checking', isChecking);
 }
 
-// Guards against the background poll (below) piling on top of an already
-// in-flight waitForResult(), whether that was started by this tab's own
-// button click or by a scheduled check picked up on a previous poll.
+// Fresh results arrived: reload, unless a sheet is open (don't yank a form
+// out from under the user) - then reload as soon as it closes.
+function reloadWhenIdle() {
+  if (!document.querySelector('.modal-overlay.open')) { cxReload(); return; }
+  const obs = new MutationObserver(() => {
+    if (!document.querySelector('.modal-overlay.open')) cxReload();
+  });
+  for (const o of document.querySelectorAll('.modal-overlay')) obs.observe(o, { attributes: true, attributeFilter: ['class'] });
+}
+
+// Guards against the background poll piling on top of an in-flight wait.
 let watching = false;
 
 async function waitForResult() {
@@ -788,92 +339,209 @@ async function waitForResult() {
   setChecking(true);
   for (let i = 0; i < 40; i++) {
     await new Promise(r => setTimeout(r, 2000));
-    const resp = await fetch(apiStatusUrl);
-    const data = await resp.json();
-    if (data.updated_at && data.updated_at !== lastUpdatedAt) {
-      window.location.reload();
-      return;
-    }
-    if (!data.checking) break;
+    try {
+      const data = await (await fetch(apiStatusUrl)).json();
+      if (data.updated_at && data.updated_at !== lastUpdatedAt) { reloadWhenIdle(); return; }
+      if (!data.checking) break;
+    } catch (e) { /* transient; keep waiting */ }
   }
   setChecking(false);
   watching = false;
 }
 
-btn.addEventListener('click', async () => {
+checkBtn.addEventListener('click', async () => {
   setChecking(true);
-  status.textContent = '';
+  checkStatus.hidden = true;
   try {
-    await fetch('{{ url_for("check_now") }}', {
+    const resp = await fetch('{{ url_for("check_now") }}', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ movie_id: movieId }),
     });
+    if (!resp.ok) throw new Error();
   } catch (e) {
     setChecking(false);
-    status.textContent = 'Could not reach the scraper.';
+    checkStatus.textContent = 'Could not reach the scraper. It may be restarting; try again in a minute.';
+    checkStatus.hidden = false;
     return;
   }
   waitForResult();
 });
 
-// The scraper also checks this movie on its own schedule (not just via the
-// button), so poll periodically for that starting - not just once at page
-// load - and reflect it on the button exactly like a manually triggered
-// check, including reloading once fresh results land.
+// The scraper also checks on its own schedule, so poll for that too and
+// reflect it exactly like a manual check, including the reload.
 async function pollForBackgroundCheck() {
-  if (watching) return;
+  if (watching || document.hidden) return;
   try {
-    const resp = await fetch(apiStatusUrl);
-    const data = await resp.json();
-    if (data.updated_at && data.updated_at !== lastUpdatedAt) {
-      window.location.reload();
-      return;
-    }
+    const data = await (await fetch(apiStatusUrl)).json();
+    if (data.updated_at && data.updated_at !== lastUpdatedAt) { reloadWhenIdle(); return; }
     if (data.checking) waitForResult();
   } catch (e) { /* transient network hiccup; retry on the next tick */ }
 }
-
 pollForBackgroundCheck();
 setInterval(pollForBackgroundCheck, 10000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollForBackgroundCheck(); });
 
-// --- Showtimes sorting & filtering (client-side; all matches are already
-// rendered, so re-sort/hide rows in place instead of round-tripping). ---
-const resultsTable = document.getElementById('results-table');
-if (resultsTable) {
-  const tbody = resultsTable.querySelector('tbody');
-  const rows = Array.from(tbody.querySelectorAll('tr'));
-  const headers = Array.from(resultsTable.querySelectorAll('th[data-sort-key]'));
-  const noMatchesEl = document.getElementById('no-matches-filtered');
+// --- Showtimes: list (by day or by free seats) and calendar, both drawn
+// from MATCHES with the same filters and the same row component. ---
+const MATCHES = {{ matches | tojson }};
+if (MATCHES.length) {
+  const listView = document.getElementById('list-view');
+  const calendarView = document.getElementById('calendar-view');
+  const noResults = document.getElementById('no-results');
+  const viewListBtn = document.getElementById('view-list-btn');
+  const viewCalendarBtn = document.getElementById('view-calendar-btn');
   const filterLowAvail = document.getElementById('filter-low-avail');
   const filterTimeFrom = document.getElementById('filter-time-from');
   const filterTimeTo = document.getElementById('filter-time-to');
-  const filterTimeHint = document.getElementById('filter-time-hint');
   const weekdayCheckboxes = Array.from(document.querySelectorAll('.filter-weekday'));
   const audioLanguageCheckboxes = Array.from(document.querySelectorAll('.filter-audio-language'));
   const formatCheckboxes = Array.from(document.querySelectorAll('.filter-format'));
+  const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
+  const sortField = document.getElementById('sort-field');
   const filtersToggle = document.getElementById('filters-toggle');
   const filtersPanel = document.getElementById('filters-panel');
-  const filtersReset = document.getElementById('filters-reset');
   const filtersBadge = document.getElementById('filters-badge');
-  const listView = document.getElementById('list-view');
-  const calendarView = document.getElementById('calendar-view');
-  const viewListBtn = document.getElementById('view-list-btn');
-  const viewCalendarBtn = document.getElementById('view-calendar-btn');
   const calGrid = document.getElementById('calendar-grid');
   const calMonthLabel = document.getElementById('cal-month-label');
-  const calPrevBtn = document.getElementById('cal-prev');
-  const calNextBtn = document.getElementById('cal-next');
-  const agendaEmpty = document.getElementById('agenda-empty');
-  const agendaList = document.getElementById('agenda-list');
-  const MATCHES = {{ matches | tojson }};
+  const agenda = document.getElementById('agenda');
 
-  // Filters persist across reloads (including the auto-reload after a
-  // background check finishes) so they don't silently reset on the user.
-  const FILTERS_STORAGE_KEY = `cc-filters:${movieId}`;
+  const LOW_AVAILABILITY_THRESHOLD = 0.3;
+  const NEW_WINDOW_MS = 24 * 3600 * 1000;
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  let sortMode = 'date';
+
+  // sale_start is Prague local time without an offset, like start_time.
+  const saleUpcoming = m => !!m.sale_start && new Date(m.sale_start) > new Date();
+  // A literal sold_out flag and anything that *displays* as 0% read the same.
+  // Before booking opens, the low pre-sale ratio doesn't mean sold out.
+  const isSoldOut = m => !saleUpcoming(m) && (!!m.sold_out || (m.availability != null && m.availability < 0.005));
+  const saleOpensLabel = m => {
+    const d = new Date(m.sale_start);
+    return `Opens ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${hhmm(d)}`;
+  };
+  // Same thresholds as webui.py's card_status_tier, so a colour means the
+  // same thing on the index and here.
+  function tier(m) {
+    if (saleUpcoming(m)) return 'upcoming';
+    if (isSoldOut(m)) return 'sold';
+    if (m.availability == null) return 'none';
+    if (m.availability >= 0.5) return 'good';
+    if (m.availability >= 0.15) return 'fair';
+    return 'low';
+  }
+  const pad = n => String(n).padStart(2, '0');
+  const dateKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const hhmm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  function dayTitle(key) {
+    const d = new Date(`${key}T00:00:00`);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.round((d - today) / 86400000);
+    const opts = { weekday: 'long', day: 'numeric', month: 'long' };
+    if (d.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
+    const label = d.toLocaleDateString('en-GB', opts);
+    return diff === 0 ? `Today, ${label}` : diff === 1 ? `Tomorrow, ${label}` : label;
+  }
+
+  // Matches the seats() macro in _macros.html.
+  function seatStrip(m) {
+    const strip = document.createElement('span');
+    const t = tier(m);
+    strip.className = `seats ${t}`;
+    const lit = isSoldOut(m) || m.availability == null ? 0 : Math.max(1, Math.round(m.availability * 20));
+    for (let i = 0; i < 20; i++) {
+      const seat = document.createElement('i');
+      if (i < lit) seat.className = 'on';
+      strip.appendChild(seat);
+    }
+    strip.setAttribute('aria-hidden', 'true');
+    return strip;
+  }
+
+  function showRow(m, withDate) {
+    const dt = new Date(m.start_time);
+    const sold = isSoldOut(m);
+    const t = tier(m);
+    const row = document.createElement('article');
+    row.className = 'show' + (sold ? ' sold' : '') + (withDate ? ' dated' : '');
+
+    const time = document.createElement('div');
+    time.className = 'show-time';
+    if (withDate) {
+      const date = document.createElement('span');
+      date.className = 'show-date';
+      date.textContent = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      time.appendChild(date);
+    }
+    time.append(hhmm(dt));
+
+    const info = document.createElement('div');
+    info.className = 'show-info';
+    const hall = document.createElement('span');
+    hall.className = 'hall';
+    hall.textContent = m.auditorium || 'Unknown hall';
+    info.appendChild(hall);
+    if (!sold && m.fetched_at && Date.now() - new Date(m.fetched_at).getTime() < NEW_WINDOW_MS) {
+      const badge = document.createElement('span');
+      badge.className = 'badge-new';
+      badge.textContent = 'New';
+      badge.title = `First seen ${formatRelative(m.fetched_at)}`;
+      info.appendChild(badge);
+    }
+    const tags = [];
+    if (m.format) tags.push([m.format, `${m.format} screening`]);
+    if (m.audio_language_code) tags.push([m.audio_language_code.toUpperCase(), `${m.audio_language} audio`]);
+    if (m.subtitle_language_code) tags.push([`${m.subtitle_language_code.toUpperCase()} subs`, `${m.subtitle_language} subtitles`]);
+    if (m.member_only) tags.push(['Members only', 'Only Cinema City members can book this showtime']);
+    for (const [text, title] of tags) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = text;
+      tag.title = title;
+      info.appendChild(tag);
+    }
+
+    const seats = document.createElement('div');
+    seats.className = 'show-seats';
+    // Seat counts mean nothing before booking opens - the opening time
+    // gets the strip's room instead.
+    if (t !== 'upcoming') seats.appendChild(seatStrip(m));
+    const label = document.createElement('span');
+    label.className = `seat-label tier-${t}`;
+    label.textContent = t === 'upcoming' ? saleOpensLabel(m)
+      : sold ? 'Sold out'
+      : m.availability != null ? `${Math.round(m.availability * 100)}% free` : 'Seats unknown';
+    if (t === 'upcoming') label.title = 'Booking opens at this time. The booking page can be opened before.';
+    seats.appendChild(label);
+
+    const book = document.createElement('div');
+    book.className = 'show-book';
+    if (!sold && m.booking_link) {
+      const a = document.createElement('a');
+      a.className = 'btn';
+      a.href = m.booking_link;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'Book';
+      a.setAttribute('aria-label', `Book ${hhmm(dt)} on ${dt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`);
+      book.appendChild(a);
+    }
+
+    row.append(time, info, seats, book);
+    return row;
+  }
+
+  // --- filters (persisted per movie; v2 key so the old default of hiding
+  // low availability, which hid exactly the pre-sale showtimes this app
+  // watches for, doesn't carry over) ---
+  const FILTERS_STORAGE_KEY = `cc-filters-v2:${movieId}`;
+  const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
   function saveFilterState() {
     const state = {
+      sort: sortMode,
       lowAvail: filterLowAvail.checked,
       timeFrom: filterTimeFrom.value,
       timeTo: filterTimeTo.value,
@@ -881,39 +549,25 @@ if (resultsTable) {
       audioLanguages: Object.fromEntries(audioLanguageCheckboxes.map(cb => [cb.dataset.lang, cb.checked])),
       formats: Object.fromEntries(formatCheckboxes.map(cb => [cb.dataset.format, cb.checked])),
     };
-    try {
-      localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(state));
-    } catch (e) { /* storage unavailable (private mode, quota, ...) */ }
+    try { localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* private mode */ }
   }
 
   function loadFilterState() {
     let saved = null;
-    try {
-      saved = JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY));
-    } catch (e) { /* corrupt/absent value */ }
+    try { saved = JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)); } catch (e) { /* corrupt */ }
     if (!saved) return;
+    if (saved.sort === 'date' || saved.sort === 'seats') sortMode = saved.sort;
     if (typeof saved.lowAvail === 'boolean') filterLowAvail.checked = saved.lowAvail;
-    if (typeof saved.timeFrom === 'string') filterTimeFrom.value = saved.timeFrom;
-    if (typeof saved.timeTo === 'string') filterTimeTo.value = saved.timeTo;
-    for (const cb of weekdayCheckboxes) {
-      if (saved.weekdays && cb.dataset.day in saved.weekdays) cb.checked = saved.weekdays[cb.dataset.day];
-    }
-    for (const cb of audioLanguageCheckboxes) {
-      if (saved.audioLanguages && cb.dataset.lang in saved.audioLanguages) cb.checked = saved.audioLanguages[cb.dataset.lang];
-    }
-    for (const cb of formatCheckboxes) {
-      if (saved.formats && cb.dataset.format in saved.formats) cb.checked = saved.formats[cb.dataset.format];
-    }
+    if (TIME_RE.test(saved.timeFrom)) filterTimeFrom.value = saved.timeFrom;
+    if (TIME_RE.test(saved.timeTo)) filterTimeTo.value = saved.timeTo;
+    for (const cb of weekdayCheckboxes) if (saved.weekdays && cb.dataset.day in saved.weekdays) cb.checked = saved.weekdays[cb.dataset.day];
+    for (const cb of audioLanguageCheckboxes) if (saved.audioLanguages && cb.dataset.lang in saved.audioLanguages) cb.checked = saved.audioLanguages[cb.dataset.lang];
+    for (const cb of formatCheckboxes) if (saved.formats && cb.dataset.format in saved.formats) cb.checked = saved.formats[cb.dataset.format];
   }
 
-  loadFilterState();
-
-  // Counts filter *categories* (not individual checkboxes) that differ from
-  // filtersReset's defaults, so the badge reads e.g. "2" for "time range +
-  // one weekday excluded" rather than a confusing per-checkbox tally.
   function countActiveFilters() {
     let count = 0;
-    if (!filterLowAvail.checked) count++;
+    if (filterLowAvail.checked) count++;
     if (filterTimeFrom.value !== '00:00' || filterTimeTo.value !== '23:59') count++;
     if (weekdayCheckboxes.some(cb => !cb.checked)) count++;
     if (audioLanguageCheckboxes.some(cb => !cb.checked)) count++;
@@ -921,218 +575,66 @@ if (resultsTable) {
     return count;
   }
 
-  function updateFiltersBadge() {
-    const count = countActiveFilters();
-    filtersBadge.textContent = String(count);
-    filtersBadge.hidden = count === 0;
+  function passesFilters(m) {
+    if (!m.start_time) return false;
+    if (filterLowAvail.checked && !saleUpcoming(m) && (isSoldOut(m) || (m.availability != null && m.availability < LOW_AVAILABILITY_THRESHOLD))) return false;
+    const dt = new Date(m.start_time);
+    const t = hhmm(dt);
+    const from = TIME_RE.test(filterTimeFrom.value) ? filterTimeFrom.value : '00:00';
+    const to = TIME_RE.test(filterTimeTo.value) ? filterTimeTo.value : '23:59';
+    if (t < from || t > to) return false;
+    if (!weekdayCheckboxes.some(cb => cb.checked && +cb.dataset.day === dt.getDay())) return false;
+    const lang = m.audio_language || 'Unknown';
+    if (audioLanguageCheckboxes.length && !audioLanguageCheckboxes.some(cb => cb.checked && cb.dataset.lang === lang)) return false;
+    const fmt = m.format || 'Unknown';
+    if (formatCheckboxes.length && !formatCheckboxes.some(cb => cb.checked && cb.dataset.format === fmt)) return false;
+    return true;
   }
 
-  updateFiltersBadge();
+  const filtered = () => MATCHES.filter(passesFilters);
+  const byStart = (a, b) => (a.start_time || '').localeCompare(b.start_time || '');
+  // Not on sale yet sorts after every bookable showtime, before sold out.
+  const seatsValue = m => saleUpcoming(m) ? -0.5 : isSoldOut(m) || m.availability == null ? -1 : m.availability;
 
-  filtersToggle.addEventListener('click', () => {
-    const isOpen = filtersPanel.classList.toggle('open');
-    filtersToggle.setAttribute('aria-expanded', String(isOpen));
-  });
-
-  // Custom time dropdown (half-hour steps) — native <input type="time">/
-  // <datalist> support for suggestion dropdowns is unreliable across
-  // browsers (Firefox doesn't show one at all; Chrome only honors it
-  // inconsistently), so build a small combobox ourselves instead.
-  const TIME_OPTIONS = [];
-  for (let i = 0; i < 48; i++) {
-    const h = String(Math.floor(i / 2)).padStart(2, '0');
-    const m = i % 2 === 0 ? '00' : '30';
-    TIME_OPTIONS.push(`${h}:${m}`);
-  }
-
-  function setupTimeCombo(inputId) {
-    const input = document.getElementById(inputId);
-    const toggle = document.querySelector(`.time-combo-toggle[data-for="${inputId}"]`);
-    const list = document.querySelector(`.time-combo-list[data-for="${inputId}"]`);
-    for (const t of TIME_OPTIONS) {
-      const opt = document.createElement('div');
-      opt.className = 'time-combo-option';
-      opt.textContent = t;
-      opt.addEventListener('click', () => {
-        input.value = t;
-        list.classList.remove('open');
-        refreshAll();
-      });
-      list.appendChild(opt);
+  function renderList() {
+    const items = filtered();
+    listView.replaceChildren();
+    if (sortMode === 'seats') {
+      items.sort((a, b) => seatsValue(b) - seatsValue(a) || byStart(a, b));
+      for (const m of items) listView.appendChild(showRow(m, true));
+      return items.length;
     }
-    toggle.addEventListener('click', () => {
-      for (const other of document.querySelectorAll('.time-combo-list.open')) {
-        if (other !== list) other.classList.remove('open');
-      }
-      list.classList.toggle('open');
-    });
-  }
-
-  setupTimeCombo('filter-time-from');
-  setupTimeCombo('filter-time-to');
-
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.time-combo')) {
-      for (const list of document.querySelectorAll('.time-combo-list.open')) list.classList.remove('open');
+    const groups = new Map();
+    for (const m of items.sort(byStart)) {
+      const key = dateKey(new Date(m.start_time));
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(m);
     }
-  });
-
-  const LOW_AVAILABILITY_THRESHOLD = 0.3;
-  const DEFAULT_SORT_DIR = { start_time: 'asc', auditorium: 'asc', availability: 'desc' };
-  let sortKey = 'availability';
-  let sortDir = 'desc';
-
-  function rowValue(row, key) {
-    if (key === 'availability') {
-      const raw = row.dataset.availability;
-      if (row.dataset.soldOut === 'true') return -1;
-      return raw === '' ? -1 : parseFloat(raw);
+    for (const [key, shows] of groups) {
+      const section = document.createElement('section');
+      section.className = 'day';
+      const head = document.createElement('div');
+      head.className = 'day-head';
+      const h = document.createElement('h3');
+      h.textContent = dayTitle(key);
+      const count = document.createElement('span');
+      count.className = 'day-count';
+      count.textContent = `${shows.length} showtime${shows.length !== 1 ? 's' : ''}`;
+      head.append(h, count);
+      section.appendChild(head);
+      for (const m of shows) section.appendChild(showRow(m, false));
+      listView.appendChild(section);
     }
-    if (key === 'start_time') return row.dataset.startTime;
-    if (key === 'format') return (row.dataset.format || '').toLowerCase();
-    if (key === 'audio_language') return (row.dataset.audioLanguage || '').toLowerCase();
-    return row.dataset.auditorium.toLowerCase();
+    return items.length;
   }
 
-  // Filter predicates work against this common shape so the list (rows,
-  // via rowToFilterable) and the calendar (raw matches, via
-  // matchToFilterable) apply identical filtering instead of drifting.
-  function rowToFilterable(row) {
-    return {
-      startTime: row.dataset.startTime || null,
-      soldOut: row.dataset.soldOut === 'true',
-      availability: row.dataset.availability === '' ? null : parseFloat(row.dataset.availability),
-      audioLanguage: row.dataset.audioLanguage,
-      format: row.dataset.format,
-    };
-  }
+  // --- calendar ---
+  let calendarMonth = null;
+  let selectedDayKey = null;
 
-  // A literal sold_out flag and anything that *displays* as 0% (rounded,
-  // same as the list table's %.0f) should read identically - 0.003 rounds
-  // to "0%" but never strictly equals 0.
-  function isSoldOut(m) {
-    return !!m.sold_out || (m.availability != null && m.availability < 0.005);
-  }
-
-  function matchToFilterable(m) {
-    return {
-      startTime: m.start_time || null,
-      soldOut: isSoldOut(m),
-      availability: m.availability == null ? null : m.availability,
-      audioLanguage: m.audio_language || 'Unknown',
-      format: m.format || 'Unknown',
-    };
-  }
-
-  function isLowAvailability(f) {
-    if (f.soldOut) return true;
-    return f.availability != null && f.availability < LOW_AVAILABILITY_THRESHOLD;
-  }
-
-  const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-
-  function parseTimeInput(value, fallback) {
-    return TIME_RE.test(value) ? value : fallback;
-  }
-
-  function isWithinTimeRange(f) {
-    if (!f.startTime) return false;
-    const dt = new Date(f.startTime);
-    const hh = String(dt.getHours()).padStart(2, '0');
-    const mm = String(dt.getMinutes()).padStart(2, '0');
-    const t = `${hh}:${mm}`;
-    const from = parseTimeInput(filterTimeFrom.value, '00:00');
-    const to = parseTimeInput(filterTimeTo.value, '23:59');
-    return t >= from && t <= to;
-  }
-
-  function isSelectedWeekday(f) {
-    if (!f.startTime) return false;
-    const day = new Date(f.startTime).getDay();
-    return weekdayCheckboxes.some(cb => cb.checked && parseInt(cb.dataset.day, 10) === day);
-  }
-
-  function isSelectedAudioLanguage(f) {
-    if (audioLanguageCheckboxes.length === 0) return true;
-    return audioLanguageCheckboxes.some(cb => cb.checked && cb.dataset.lang === f.audioLanguage);
-  }
-
-  function isSelectedFormat(f) {
-    if (formatCheckboxes.length === 0) return true;
-    return formatCheckboxes.some(cb => cb.checked && cb.dataset.format === f.format);
-  }
-
-  function passesFilters(f) {
-    return !(filterLowAvail.checked && isLowAvailability(f)) &&
-      isWithinTimeRange(f) &&
-      isSelectedWeekday(f) &&
-      isSelectedAudioLanguage(f) &&
-      isSelectedFormat(f);
-  }
-
-  function updateHeaderIndicators() {
-    for (const th of headers) {
-      th.querySelector('.sort-arrow')?.remove();
-      const isActive = th.dataset.sortKey === sortKey;
-      th.classList.toggle('sort-active', isActive);
-      if (isActive) {
-        const arrow = document.createElement('span');
-        arrow.className = 'sort-arrow';
-        arrow.textContent = sortDir === 'asc' ? '▲' : '▼';
-        th.appendChild(arrow);
-      }
-    }
-  }
-
-  // Reuses the calendar's red->green gradient (availabilityColor/
-  // availabilityTextColor, defined below) so the list view - what actually
-  // loads first - carries the same at-a-glance availability signal instead
-  // of a flat green/red split.
-  function applyAvailabilityPillColors() {
-    for (const pill of resultsTable.querySelectorAll('.avail-pill')) {
-      const fraction = parseFloat(pill.dataset.availFraction);
-      pill.style.background = availabilityColor(fraction, false);
-      pill.style.color = availabilityTextColor(fraction);
-    }
-  }
-
-  function render() {
-    const sorted = rows.slice().sort((a, b) => {
-      const va = rowValue(a, sortKey);
-      const vb = rowValue(b, sortKey);
-      if (va < vb) return sortDir === 'asc' ? -1 : 1;
-      if (va > vb) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    for (const row of sorted) tbody.appendChild(row);
-
-    let visibleCount = 0;
-    for (const row of rows) {
-      const hidden = !passesFilters(rowToFilterable(row));
-      row.style.display = hidden ? 'none' : '';
-      if (!hidden) visibleCount++;
-    }
-    resultsTable.style.display = visibleCount === 0 ? 'none' : '';
-    if (noMatchesEl) noMatchesEl.style.display = visibleCount === 0 ? '' : 'none';
-
-    updateHeaderIndicators();
-    applyAvailabilityPillColors();
-  }
-
-  // --- Calendar view: month grid color-coded by daily availability, with
-  // an Outlook-style agenda of a selected day's showtimes. Reuses the
-  // list's filter controls (via matchToFilterable/passesFilters above)
-  // rather than showing a dataset the visible Filters button can't affect. ---
-  const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-  function dateKey(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
-
-  function filteredMatchesByDate() {
+  function groupedByDay(items) {
     const map = new Map();
-    for (const m of MATCHES) {
-      if (!m.start_time || !passesFilters(matchToFilterable(m))) continue;
+    for (const m of items) {
       const key = dateKey(new Date(m.start_time));
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(m);
@@ -1140,219 +642,89 @@ if (resultsTable) {
     return map;
   }
 
-  function dayStats(byDate, key) {
-    const items = byDate.get(key);
-    if (!items || items.length === 0) return null;
-    const open = items.filter(m => !isSoldOut(m) && m.availability != null);
-    return {
-      count: items.length,
-      best: open.length ? Math.max(...open.map(m => m.availability)) : null,
-      allSoldOut: open.length === 0,
-    };
+  function dayTier(shows) {
+    const open = shows.filter(m => !saleUpcoming(m) && !isSoldOut(m) && m.availability != null);
+    if (!open.length) return shows.some(saleUpcoming) ? 'upcoming' : 'sold';
+    return tier(open.reduce((a, b) => (b.availability > a.availability ? b : a)));
   }
 
-  // Red -> green hue sweep, vivid rather than tinted-dark or pastel: fill
-  // for the calendar tile / agenda background, a deeper/more saturated
-  // shade for the agenda item's accent border. Dark mode reads well fairly
-  // muted; against the light UI the same values look flat, so light mode
-  // uses a punchier fill/border pair.
-  const DARK_TILE_SAT = 40, DARK_TILE_LIGHT = 40;
-  const DARK_BORDER_SAT = 45, DARK_BORDER_LIGHT = 25;
-  const LIGHT_TILE_SAT = 55, LIGHT_TILE_LIGHT = 48;
-  const LIGHT_BORDER_SAT = 60, LIGHT_BORDER_LIGHT = 30;
-
-  function isLightTheme() {
-    return document.documentElement.dataset.theme === 'light';
-  }
-
-  function tileParams() {
-    return isLightTheme() ? [LIGHT_TILE_SAT, LIGHT_TILE_LIGHT] : [DARK_TILE_SAT, DARK_TILE_LIGHT];
-  }
-
-  function borderParams() {
-    return isLightTheme() ? [LIGHT_BORDER_SAT, LIGHT_BORDER_LIGHT] : [DARK_BORDER_SAT, DARK_BORDER_LIGHT];
-  }
-
-  function availabilityColor(fraction, bright) {
-    const hue = Math.max(0, Math.min(1, fraction)) * 120;
-    const [s, l] = bright ? borderParams() : tileParams();
-    return `hsl(${hue}, ${s}%, ${l}%)`;
-  }
-
-  // Yellow reads far lighter than red/green at the same HSL lightness, so a
-  // single fixed text color can't stay legible across the whole hue sweep -
-  // flip between white and dark text based on the fill's actual perceived
-  // luminance instead.
-  function hslToRgb(h, s, l) {
-    s /= 100; l /= 100;
-    const c = (1 - Math.abs(2 * l - 1)) * s;
-    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-    const m = l - c / 2;
-    const [r, g, b] = h < 60 ? [c, x, 0] : [x, c, 0];
-    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
-  }
-
-  function perceivedLuminance([r, g, b]) {
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  }
-
-  function availabilityTextColor(fraction) {
-    const hue = Math.max(0, Math.min(1, fraction)) * 120;
-    const [s, l] = tileParams();
-    const lum = perceivedLuminance(hslToRgb(hue, s, l));
-    return lum > 0.6 ? '#1a1a1a' : '#fff';
-  }
-
-  // Picked once, from whatever's filtered in at first visit to the
-  // calendar, rather than recomputed on every filter change - so browsing
-  // months isn't interrupted by the view jumping around under the user.
-  let calendarMonth = null;
-  let selectedDayKey = null;
-
-  function renderAgenda(key) {
-    selectedDayKey = key;
-    agendaList.innerHTML = '';
-    if (key === null) {
-      agendaEmpty.textContent = 'Select a day to see showtimes.';
-      agendaEmpty.style.display = '';
-      agendaList.style.display = 'none';
-      return;
-    }
-    const items = (filteredMatchesByDate().get(key) || []).slice()
-      .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
-    if (items.length === 0) {
-      agendaEmpty.textContent = 'No showtimes match the current filters for this day.';
-      agendaEmpty.style.display = '';
-      agendaList.style.display = 'none';
-      return;
-    }
-    agendaEmpty.style.display = 'none';
-    agendaList.style.display = '';
-    for (const m of items) {
-      const dt = new Date(m.start_time);
-      const fraction = (isSoldOut(m) || m.availability == null) ? 0 : m.availability;
-
-      const item = document.createElement('div');
-      item.className = 'agenda-item';
-      item.style.borderLeftColor = availabilityColor(fraction, true);
-      item.style.background = availabilityColor(fraction, false);
-      item.style.color = availabilityTextColor(fraction);
-
-      const time = document.createElement('span');
-      time.className = 'agenda-time';
-      time.textContent = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
-
-      const meta = document.createElement('span');
-      meta.className = 'agenda-meta';
-      const metaParts = [m.auditorium, m.format, m.audio_language_code ? m.audio_language_code.toUpperCase() : null].filter(Boolean);
-      meta.textContent = metaParts.join(' · ');
-
-      const avail = document.createElement('span');
-      avail.className = 'agenda-avail';
-      avail.textContent = isSoldOut(m) ? 'Sold out' : (m.availability != null ? `${Math.round(m.availability * 100)}% free` : '—');
-
-      item.append(time, meta, avail);
-
-      if (!isSoldOut(m) && m.booking_link) {
-        const link = document.createElement('a');
-        link.className = 'book';
-        link.href = m.booking_link;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.innerHTML = 'Book <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>';
-        // The tile behind this item is colored anywhere across the
-        // red->green availability gradient, which passes right through
-        // amber hues close to the accent orange itself - a plain orange
-        // pill can nearly vanish against a mid-availability tile. A ring
-        // in whichever of white/near-black the tile's own text already
-        // uses (same luminance-flip as availabilityTextColor) keeps it
-        // visible regardless of the tile's hue.
-        link.style.boxShadow = `0 0 0 1px ${availabilityTextColor(fraction)}`;
-        item.appendChild(link);
-      }
-
-      agendaList.appendChild(item);
-    }
+  function renderAgenda(byDay) {
+    agenda.replaceChildren();
+    if (!selectedDayKey || !byDay.has(selectedDayKey)) return;
+    const section = document.createElement('section');
+    section.className = 'day';
+    const head = document.createElement('div');
+    head.className = 'day-head';
+    const h = document.createElement('h3');
+    h.textContent = dayTitle(selectedDayKey);
+    head.appendChild(h);
+    section.appendChild(head);
+    for (const m of byDay.get(selectedDayKey).slice().sort(byStart)) section.appendChild(showRow(m, false));
+    agenda.appendChild(section);
   }
 
   function renderCalendar() {
-    const byDate = filteredMatchesByDate();
+    const items = filtered();
+    const byDay = groupedByDay(items);
+    const keys = Array.from(byDay.keys()).sort();
     if (!calendarMonth) {
-      const firstDateWithMatches = Array.from(byDate.keys()).sort()[0];
-      const seed = firstDateWithMatches ? new Date(`${firstDateWithMatches}T00:00:00`) : new Date();
+      const seed = keys[0] ? new Date(`${keys[0]}T00:00:00`) : new Date();
       calendarMonth = new Date(seed.getFullYear(), seed.getMonth(), 1);
     }
+    if (selectedDayKey === null || !byDay.has(selectedDayKey)) {
+      const monthPrefix = `${calendarMonth.getFullYear()}-${pad(calendarMonth.getMonth() + 1)}`;
+      selectedDayKey = keys.find(k => k.startsWith(monthPrefix)) || null;
+    }
     calMonthLabel.textContent = `${MONTHS[calendarMonth.getMonth()]} ${calendarMonth.getFullYear()}`;
-    calGrid.innerHTML = '';
-
-    for (const label of WEEKDAY_LABELS) {
+    calGrid.replaceChildren();
+    for (const w of WEEKDAYS) {
       const el = document.createElement('div');
-      el.className = 'calendar-weekday';
-      el.textContent = label;
+      el.className = 'cal-wd';
+      el.textContent = w;
       calGrid.appendChild(el);
     }
-
-    const startOffset = (calendarMonth.getDay() + 6) % 7; // Monday-first grid
+    const offset = (calendarMonth.getDay() + 6) % 7; // Monday-first
+    for (let i = 0; i < offset; i++) {
+      const blank = document.createElement('div');
+      blank.className = 'cal-day blank';
+      calGrid.appendChild(blank);
+    }
     const daysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
     const todayKey = dateKey(new Date());
-
-    for (let i = 0; i < startOffset; i++) {
-      const el = document.createElement('div');
-      el.className = 'calendar-day empty';
-      calGrid.appendChild(el);
-    }
-
     for (let day = 1; day <= daysInMonth; day++) {
       const key = dateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day));
-      const stats = dayStats(byDate, key);
-
-      const cell = document.createElement('div');
-      cell.className = 'calendar-day';
+      const shows = byDay.get(key);
+      const cell = document.createElement(shows ? 'button' : 'div');
+      cell.className = 'cal-day';
+      cell.textContent = String(day);
       if (key === todayKey) cell.classList.add('today');
-      if (key === selectedDayKey) cell.classList.add('selected');
-
-      const num = document.createElement('span');
-      num.className = 'day-num';
-      num.textContent = String(day);
-      cell.appendChild(num);
-
-      if (!stats) {
-        cell.classList.add('no-shows');
-        const count = document.createElement('span');
-        count.className = 'day-count';
-        count.textContent = 'No shows';
-        cell.appendChild(count);
-      } else {
-        if (stats.allSoldOut) {
-          cell.classList.add('sold-out-day');
-        } else {
-          cell.style.background = availabilityColor(stats.best, false);
-          cell.style.color = availabilityTextColor(stats.best);
-        }
-        const count = document.createElement('span');
-        count.className = 'day-count';
-        count.textContent = stats.allSoldOut ? 'Sold out' : `${stats.count} show${stats.count !== 1 ? 's' : ''}`;
-        cell.appendChild(count);
+      if (shows) {
+        cell.type = 'button';
+        cell.classList.add('has', dayTier(shows));
+        cell.setAttribute('aria-label', `${dayTitle(key)}, ${shows.length} showtime${shows.length !== 1 ? 's' : ''}`);
+        if (key === selectedDayKey) { cell.classList.add('selected'); cell.setAttribute('aria-pressed', 'true'); }
         cell.addEventListener('click', () => {
-          for (const el of calGrid.querySelectorAll('.calendar-day.selected')) el.classList.remove('selected');
-          cell.classList.add('selected');
-          renderAgenda(key);
+          selectedDayKey = key;
+          renderCalendar();
+          agenda.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         });
       }
-
       calGrid.appendChild(cell);
     }
+    renderAgenda(byDay);
+    return items.length;
   }
 
-  // Which view is showing persists per-movie so a reload doesn't kick the
-  // user back to List; a fresh visit (clicked in from the main page rather
-  // than reloaded) instead falls back to the saved "Default view" setting.
+  // --- view switching (persisted per movie on reload; a fresh visit uses
+  // the "Open movies in" setting) ---
   const VIEW_STORAGE_KEY = `cc-view:${movieId}`;
   const DEFAULT_VIEW = {{ settings.default_view | tojson }};
+  let view = 'list';
 
   function isReloadNavigation() {
     const [entry] = performance.getEntriesByType('navigation');
-    return entry ? entry.type === 'reload' : false;
+    if (entry && entry.type === 'reload') return true;
+    try { return !!document.referrer && new URL(document.referrer).pathname === location.pathname; } catch (e) { return false; }
   }
 
   function initialView() {
@@ -1363,113 +735,69 @@ if (resultsTable) {
     return DEFAULT_VIEW === 'calendar' ? 'calendar' : 'list';
   }
 
-  function setView(view) {
+  function refresh() {
     const isList = view === 'list';
-    listView.style.display = isList ? '' : 'none';
-    calendarView.style.display = isList ? 'none' : '';
-    viewListBtn.classList.toggle('active', isList);
+    listView.hidden = !isList;
+    calendarView.hidden = isList;
+    sortField.hidden = !isList;
     viewListBtn.setAttribute('aria-pressed', String(isList));
-    viewCalendarBtn.classList.toggle('active', !isList);
     viewCalendarBtn.setAttribute('aria-pressed', String(!isList));
-    if (!isList) renderCalendar();
-    try {
-      localStorage.setItem(VIEW_STORAGE_KEY, view);
-    } catch (e) { /* storage unavailable (private mode, quota, ...) */ }
+    for (const b of sortButtons) b.setAttribute('aria-pressed', String(b.dataset.sort === sortMode));
+    const count = isList ? renderList() : renderCalendar();
+    noResults.hidden = count > 0;
+    if (!isList) calendarView.hidden = count === 0;
+    const active = countActiveFilters();
+    filtersBadge.textContent = String(active);
+    filtersBadge.hidden = active === 0;
   }
 
-  // The Filters button/panel is shared between both views (see
-  // passesFilters above), so any filter change has to refresh whichever
-  // view is currently on screen, not just the list's rows.
-  function refreshAll() {
+  function setView(v) {
+    view = v;
+    try { localStorage.setItem(VIEW_STORAGE_KEY, v); } catch (e) { /* private mode */ }
+    refresh();
+  }
+
+  function onFilterChange() {
     saveFilterState();
-    updateFiltersBadge();
-    render();
-    if (calendarView.style.display !== 'none') {
-      renderCalendar();
-      renderAgenda(selectedDayKey);
-    }
+    refresh();
   }
 
-  function sortByHeader(th) {
-    const key = th.dataset.sortKey;
-    if (key === sortKey) {
-      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      sortKey = key;
-      sortDir = DEFAULT_SORT_DIR[key] || 'asc';
-    }
-    render();
-  }
-
-  for (const th of headers) {
-    th.addEventListener('click', () => sortByHeader(th));
-    th.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        sortByHeader(th);
-      }
-    });
-  }
-
-  for (const cb of [filterLowAvail, ...weekdayCheckboxes, ...audioLanguageCheckboxes, ...formatCheckboxes]) {
-    cb.addEventListener('change', refreshAll);
-  }
-  // Typing something that isn't a valid HH:MM just falls back to the
-  // unrestricted default silently (see parseTimeInput) - flag the field
-  // itself so that fallback isn't invisible to the user.
-  function updateTimeInputValidity(input) {
-    input.classList.toggle('invalid', input.value !== '' && !TIME_RE.test(input.value));
-    const anyInvalid = [filterTimeFrom, filterTimeTo].some(i => i.value !== '' && !TIME_RE.test(i.value));
-    filterTimeHint.style.display = anyInvalid ? '' : 'none';
-  }
-  for (const input of [filterTimeFrom, filterTimeTo]) {
-    input.addEventListener('input', () => {
-      updateTimeInputValidity(input);
-      refreshAll();
-    });
-    updateTimeInputValidity(input);
-  }
-
-  filtersReset.addEventListener('click', () => {
-    filterLowAvail.checked = true;
+  function resetFilters() {
+    filterLowAvail.checked = false;
     filterTimeFrom.value = '00:00';
     filterTimeTo.value = '23:59';
-    updateTimeInputValidity(filterTimeFrom);
-    updateTimeInputValidity(filterTimeTo);
-    for (const cb of weekdayCheckboxes) cb.checked = true;
-    for (const cb of audioLanguageCheckboxes) cb.checked = true;
-    for (const cb of formatCheckboxes) cb.checked = true;
-    sortKey = 'availability';
-    sortDir = 'desc';
-    refreshAll();
-  });
+    for (const cb of [...weekdayCheckboxes, ...audioLanguageCheckboxes, ...formatCheckboxes]) cb.checked = true;
+    sortMode = 'date';
+    onFilterChange();
+  }
 
-  calPrevBtn.addEventListener('click', () => {
+  filtersToggle.addEventListener('click', () => {
+    const open = filtersPanel.classList.toggle('open');
+    filtersToggle.setAttribute('aria-expanded', String(open));
+  });
+  for (const cb of [filterLowAvail, ...weekdayCheckboxes, ...audioLanguageCheckboxes, ...formatCheckboxes]) {
+    cb.addEventListener('change', onFilterChange);
+  }
+  for (const input of [filterTimeFrom, filterTimeTo]) input.addEventListener('change', onFilterChange);
+  for (const b of sortButtons) b.addEventListener('click', () => { sortMode = b.dataset.sort; onFilterChange(); });
+  document.getElementById('filters-reset').addEventListener('click', resetFilters);
+  document.getElementById('no-results-reset').addEventListener('click', resetFilters);
+  document.getElementById('cal-prev').addEventListener('click', () => {
     calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
-    renderCalendar();
+    selectedDayKey = null;
+    refresh();
   });
-  calNextBtn.addEventListener('click', () => {
+  document.getElementById('cal-next').addEventListener('click', () => {
     calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
-    renderCalendar();
+    selectedDayKey = null;
+    refresh();
   });
-
   viewListBtn.addEventListener('click', () => setView('list'));
   viewCalendarBtn.addEventListener('click', () => setView('calendar'));
 
-  // Availability tile colors depend on the active theme, so a live theme
-  // switch needs to repaint the calendar/agenda rather than waiting for
-  // the next render.
-  document.addEventListener('cc-theme-changed', () => {
-    applyAvailabilityPillColors();
-    if (calendarView.style.display !== 'none') {
-      renderCalendar();
-      renderAgenda(selectedDayKey);
-    }
-  });
-
-  setView(initialView());
-  render();
+  loadFilterState();
+  view = initialView();
+  refresh();
 }
 </script>
-</body>
-</html>
+{% endblock %}

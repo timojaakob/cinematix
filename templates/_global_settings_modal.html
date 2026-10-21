@@ -1,82 +1,102 @@
   <div id="global-settings-overlay" class="modal-overlay">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="global-settings-title">
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="global-settings-title">
       <div class="modal-header">
         <h2 id="global-settings-title">Settings</h2>
-        <button id="global-settings-close-btn" type="button" class="modal-close" aria-label="Close">✕</button>
+        <button id="global-settings-close-btn" type="button" class="icon-btn" aria-label="Close settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
       </div>
-      <div class="setting-row">
-        <label>Appearance</label>
-        <label class="theme-switch">
+
+      <div class="field field-row">
+        <span class="field-label">Light mode</span>
+        <label class="switch">
           <input type="checkbox" id="theme-switch-input">
-          <span class="theme-switch-track"><span class="theme-switch-thumb"></span></span>
-          <span id="theme-switch-label">Dark mode</span>
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+          <span id="theme-switch-label" class="visually-hidden">Dark mode</span>
         </label>
       </div>
 
       <form id="global-settings-form" method="post" action="{{ url_for('update_global_settings') }}">
         <input type="hidden" name="next" value="{{ request.path }}">
-        <div class="setting-row">
-          <label for="default-view-select">Default view</label>
-          <select id="default-view-select" name="default_view">
-            <option value="list" {% if settings.default_view == 'list' %}selected{% endif %}>List</option>
-            <option value="calendar" {% if settings.default_view == 'calendar' %}selected{% endif %}>Calendar</option>
-          </select>
-          <p class="setting-hint">Shown when you open a movie fresh from the main page. Reloading the movie page keeps whatever view you last had open.</p>
+
+        <div class="field">
+          <div class="field-row">
+            <label class="field-label" for="default-view-select">Open movies in</label>
+            <select id="default-view-select" name="default_view">
+              <option value="list" {% if settings.default_view == 'list' %}selected{% endif %}>List</option>
+              <option value="calendar" {% if settings.default_view == 'calendar' %}selected{% endif %}>Calendar</option>
+            </select>
+          </div>
+          <p class="hint">Reloading a movie page keeps the view you had open.</p>
         </div>
 
-        <div class="setting-row">
-          <label for="default_check_interval">Default check frequency</label>
-          <select id="default_check_interval" name="default_check_interval">
-            {% for seconds, label in check_interval_options %}
-            <option value="{{ seconds }}" {% if settings.default_check_interval_seconds == seconds %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-            <option value="off" {% if settings.default_check_interval_seconds is none %}selected{% endif %}>Off</option>
-          </select>
-          <p class="setting-hint">Used for newly added movies — each one can still be changed individually.</p>
+        <div class="field">
+          <div class="field-row">
+            <label class="field-label" for="default_check_interval">Check new movies</label>
+            <select id="default_check_interval" name="default_check_interval">
+              {% for seconds, label in check_interval_options %}
+              <option value="{{ seconds }}" {% if settings.default_check_interval_seconds == seconds %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+              <option value="off" {% if settings.default_check_interval_seconds is none %}selected{% endif %}>Off</option>
+            </select>
+          </div>
+          <p class="hint">You can change it for each movie later.</p>
         </div>
 
-        <div class="setting-row">
-          <label>Notifications</label>
-          <div class="setting-group">
-            <div class="notify-case">
-              <label class="checkbox">
-                <input type="checkbox" name="notify_on_start" {% if settings.notify_on_start %}checked{% endif %}>
-                Scraper started
-              </label>
-              <select name="notify_on_start_priority">
-                {% for p in ntfy_priority_options %}
-                <option value="{{ p }}" {% if settings.notify_on_start_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="notify-case">
-              <label class="checkbox">
-                <input type="checkbox" name="notify_on_new_showtime" {% if settings.notify_on_new_showtime %}checked{% endif %}>
-                New showtime found
-              </label>
-              <select name="notify_on_new_showtime_priority">
-                {% for p in ntfy_priority_options %}
-                <option value="{{ p }}" {% if settings.notify_on_new_showtime_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
-                {% endfor %}
-              </select>
-            </div>
+        <div class="field">
+          <span class="field-label">Notifications</span>
+          <div class="field-row">
+            <label class="switch">
+              <input type="checkbox" name="notify_on_new_showtime" {% if settings.notify_on_new_showtime %}checked{% endif %}>
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span>New showtimes</span>
+            </label>
+            <select name="notify_on_new_showtime_priority" aria-label="Priority for new showtimes">
+              {% for p in ntfy_priority_options %}
+              <option value="{{ p }}" {% if settings.notify_on_new_showtime_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field-row">
+            <label class="switch">
+              <input type="checkbox" name="notify_on_more_seats" {% if settings.notify_on_more_seats %}checked{% endif %}>
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span>Seats freed up</span>
+            </label>
+            <select name="notify_on_more_seats_priority" aria-label="Priority for seats freed up">
+              {% for p in ntfy_priority_options %}
+              <option value="{{ p }}" {% if settings.notify_on_more_seats_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field-row">
+            <label class="switch">
+              <input type="checkbox" name="notify_on_start" {% if settings.notify_on_start %}checked{% endif %}>
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span>Scraper started</span>
+            </label>
+            <select name="notify_on_start_priority" aria-label="Priority for scraper started">
+              {% for p in ntfy_priority_options %}
+              <option value="{{ p }}" {% if settings.notify_on_start_priority == p %}selected{% endif %}>{{ p | capitalize }}</option>
+              {% endfor %}
+            </select>
           </div>
         </div>
 
-        <div class="setting-row">
-          <label for="ntfy_endpoint">ntfy endpoint</label>
-          <div class="input-with-toggle">
-            <input type="text" id="ntfy_endpoint" name="ntfy_endpoint" value="{{ settings.ntfy_endpoint }}" placeholder="https://ntfy.sh/your-topic" autocomplete="off" spellcheck="false">
-            <button type="button" id="ntfy-test-btn">Test</button>
+        <div class="field">
+          <label class="field-label" for="ntfy_endpoint">ntfy topic URL</label>
+          <div class="inline-input">
+            <input type="text" id="ntfy_endpoint" name="ntfy_endpoint" value="{{ settings.ntfy_endpoint }}" placeholder="https://ntfy.sh/your-topic" autocomplete="off" spellcheck="false" inputmode="url">
+            <button type="button" id="ntfy-test-btn" class="btn btn-quiet">Send test</button>
           </div>
-          <p id="ntfy-test-status" class="setting-hint" style="display:none;"></p>
+          <p id="ntfy-test-status" class="hint" style="display:none;"></p>
         </div>
 
-        <div class="setting-row">
-          <label for="tmdb_api_key">TMDb API key</label>
-          <div class="input-with-toggle">
+        <div class="field">
+          <label class="field-label" for="tmdb_api_key">TMDb API key</label>
+          <div class="inline-input">
             <input type="password" id="tmdb_api_key" name="tmdb_api_key" value="{{ settings.tmdb_api_key }}" autocomplete="off" spellcheck="false">
-            <button type="button" id="tmdb-key-toggle" class="icon-btn icon-only" aria-label="Show API key" aria-pressed="false">
+            <button type="button" id="tmdb-key-toggle" class="icon-btn" aria-label="Show API key" aria-pressed="false">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"></path>
                 <circle cx="12" cy="12" r="3"></circle>
@@ -87,7 +107,7 @@
         </div>
 
         <div class="modal-actions">
-          <button id="global-settings-apply-btn" type="submit" disabled>Save</button>
+          <button id="global-settings-apply-btn" type="submit" class="btn btn-primary-wide" disabled>Save settings</button>
         </div>
       </form>
     </div>
