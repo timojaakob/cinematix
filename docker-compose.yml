@@ -1,0 +1,12 @@
+services:
+  cinematix:
+    image: ghcr.io/timojaakob/cinematix:1
+    container_name: cinematix
+    restart: unless-stopped
+    ports:
+      - "8090:5000"
+    volumes:
+      - cinematix-data:/data
+
+volumes:
+  cinematix-data:
