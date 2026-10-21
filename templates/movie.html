@@ -70,7 +70,7 @@
       </div>
       <p id="check-now-status" class="hint error" hidden></p>
 
-      {% if matches %}
+      <div id="shows-ui"{% if not matches %} hidden{% endif %}>
       <div class="toolbar">
         <div class="segmented" role="group" aria-label="Showtimes view">
           <button type="button" id="view-list-btn" aria-pressed="true">List</button>
@@ -115,26 +115,15 @@
             {% endfor %}
           </div>
         </div>
-        {% if audio_languages|length > 1 %}
-        <div class="field">
+        {# Filled from the showtimes by the script, so a refresh can add values. #}
+        <div class="field" id="audio-field" hidden>
           <span class="field-label">Audio</span>
-          <div class="chips">
-            {% for lang in audio_languages %}
-            <label class="chip"><input type="checkbox" class="filter-audio-language" data-lang="{{ lang }}" checked> {{ lang }}</label>
-            {% endfor %}
-          </div>
+          <div class="chips" id="audio-chips"></div>
         </div>
-        {% endif %}
-        {% if format_options|length > 1 %}
-        <div class="field">
+        <div class="field" id="format-field" hidden>
           <span class="field-label">Format</span>
-          <div class="chips">
-            {% for fmt in format_options %}
-            <label class="chip"><input type="checkbox" class="filter-format" data-format="{{ fmt }}" checked> {{ fmt }}</label>
-            {% endfor %}
-          </div>
+          <div class="chips" id="format-chips"></div>
         </div>
-        {% endif %}
         <button type="button" id="filters-reset" class="link-btn">Reset filters</button>
       </div>
 
@@ -165,8 +154,8 @@
         <strong>No showtimes match your filters</strong>
         <button type="button" class="link-btn" id="no-results-reset">Reset filters</button>
       </div>
-      {% else %}
-      <div class="no-results">
+      </div>
+      <div class="no-results" id="empty-state"{% if matches %} hidden{% endif %}>
         <strong>No showtimes yet</strong>
         {% if movie.check_interval_seconds is none %}
           Checking is off for this movie. Turn it on in the movie settings.
@@ -174,7 +163,6 @@
           cinematix checks {{ cinema_name }} {{ interval_labels.get(movie.check_interval_seconds, 'regularly') | lower }}. You get a notification when a showtime appears.
         {% endif %}
       </div>
-      {% endif %}
     </section>
   </div>
 
@@ -290,14 +278,15 @@ removeMovieBtn.addEventListener('click', () => {
 removeMovieCancelBtn.addEventListener('click', () => setRemoveMovieConfirming(false));
 
 // --- Check now + live status ---
-const lastUpdatedAt = {{ updated_at | tojson }};
+let lastUpdatedAt = {{ updated_at | tojson }};
 const movieId = {{ movie.id | tojson }};
 const apiStatusUrl = '{{ url_for("api_status") }}?movie_id=' + encodeURIComponent(movieId);
+const matchesUrl = '{{ url_for("api_movie_matches", movie_id=movie.id) }}';
 const checkBtn = document.getElementById('check-now-btn');
 const checkLabel = document.getElementById('check-now-label');
 const checkStatus = document.getElementById('check-now-status');
 const liveDot = document.getElementById('live-dot');
-const lastCheckedEl = document.getElementById('last-checked');
+const checkedTextEl = document.getElementById('checked-text');
 
 function formatRelative(isoStr) {
   const seconds = Math.max((Date.now() - new Date(isoStr).getTime()) / 1000, 0);
@@ -309,9 +298,11 @@ function formatRelative(isoStr) {
   const days = Math.floor((seconds + 43200) / 86400);
   return `${days} day${days !== 1 ? 's' : ''} ago`;
 }
-if (lastCheckedEl && lastUpdatedAt) {
-  setInterval(() => { lastCheckedEl.textContent = formatRelative(lastUpdatedAt); }, 15000);
+function renderCheckedText() {
+  if (!lastUpdatedAt) return;
+  checkedTextEl.textContent = `Checked ${formatRelative(lastUpdatedAt)}`;
 }
+setInterval(renderCheckedText, 15000);
 
 function setChecking(isChecking) {
   checkBtn.disabled = isChecking;
@@ -320,14 +311,20 @@ function setChecking(isChecking) {
   liveDot.classList.toggle('checking', isChecking);
 }
 
-// Fresh results arrived: reload, unless a sheet is open (don't yank a form
-// out from under the user) - then reload as soon as it closes.
-function reloadWhenIdle() {
-  if (!document.querySelector('.modal-overlay.open')) { cxReload(); return; }
-  const obs = new MutationObserver(() => {
-    if (!document.querySelector('.modal-overlay.open')) cxReload();
-  });
-  for (const o of document.querySelectorAll('.modal-overlay')) obs.observe(o, { attributes: true, attributeFilter: ['class'] });
+// Fresh results arrived: redraw the showtimes in place, so the scroll
+// position, open filters and any open sheet stay as they are. Falls back
+// to a page reload if the data can't be fetched.
+async function refreshShowtimes() {
+  try {
+    const resp = await fetch(matchesUrl);
+    if (!resp.ok) throw new Error(resp.status);
+    const data = await resp.json();
+    lastUpdatedAt = data.updated_at;
+    renderCheckedText();
+    applyMatches(data.matches);
+  } catch (e) {
+    cxReload();
+  }
 }
 
 // Guards against the background poll piling on top of an in-flight wait.
@@ -341,7 +338,7 @@ async function waitForResult() {
     await new Promise(r => setTimeout(r, 2000));
     try {
       const data = await (await fetch(apiStatusUrl)).json();
-      if (data.updated_at && data.updated_at !== lastUpdatedAt) { reloadWhenIdle(); return; }
+      if (data.updated_at && data.updated_at !== lastUpdatedAt) { await refreshShowtimes(); break; }
       if (!data.checking) break;
     } catch (e) { /* transient; keep waiting */ }
   }
@@ -369,12 +366,12 @@ checkBtn.addEventListener('click', async () => {
 });
 
 // The scraper also checks on its own schedule, so poll for that too and
-// reflect it exactly like a manual check, including the reload.
+// reflect it exactly like a manual check.
 async function pollForBackgroundCheck() {
   if (watching || document.hidden) return;
   try {
     const data = await (await fetch(apiStatusUrl)).json();
-    if (data.updated_at && data.updated_at !== lastUpdatedAt) { reloadWhenIdle(); return; }
+    if (data.updated_at && data.updated_at !== lastUpdatedAt) { refreshShowtimes(); return; }
     if (data.checking) waitForResult();
   } catch (e) { /* transient network hiccup; retry on the next tick */ }
 }
@@ -384,8 +381,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) poll
 
 // --- Showtimes: list (by day or by free seats) and calendar, both drawn
 // from MATCHES with the same filters and the same row component. ---
-const MATCHES = {{ matches | tojson }};
-if (MATCHES.length) {
+let MATCHES = {{ matches | tojson }};
+// Replaced below with the function that redraws everything for new data.
+let applyMatches = () => cxReload();
+{
   const listView = document.getElementById('list-view');
   const calendarView = document.getElementById('calendar-view');
   const noResults = document.getElementById('no-results');
@@ -395,8 +394,10 @@ if (MATCHES.length) {
   const filterTimeFrom = document.getElementById('filter-time-from');
   const filterTimeTo = document.getElementById('filter-time-to');
   const weekdayCheckboxes = Array.from(document.querySelectorAll('.filter-weekday'));
-  const audioLanguageCheckboxes = Array.from(document.querySelectorAll('.filter-audio-language'));
-  const formatCheckboxes = Array.from(document.querySelectorAll('.filter-format'));
+  const showsUi = document.getElementById('shows-ui');
+  const emptyState = document.getElementById('empty-state');
+  let audioLanguageCheckboxes = [];
+  let formatCheckboxes = [];
   const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
   const sortField = document.getElementById('sort-field');
   const filtersToggle = document.getElementById('filters-toggle');
@@ -552,17 +553,17 @@ if (MATCHES.length) {
     try { localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* private mode */ }
   }
 
+  function savedFilterState() {
+    try { return JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)) || {}; } catch (e) { return {}; }
+  }
+
   function loadFilterState() {
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)); } catch (e) { /* corrupt */ }
-    if (!saved) return;
+    const saved = savedFilterState();
     if (saved.sort === 'date' || saved.sort === 'seats') sortMode = saved.sort;
     if (typeof saved.lowAvail === 'boolean') filterLowAvail.checked = saved.lowAvail;
     if (TIME_RE.test(saved.timeFrom)) filterTimeFrom.value = saved.timeFrom;
     if (TIME_RE.test(saved.timeTo)) filterTimeTo.value = saved.timeTo;
     for (const cb of weekdayCheckboxes) if (saved.weekdays && cb.dataset.day in saved.weekdays) cb.checked = saved.weekdays[cb.dataset.day];
-    for (const cb of audioLanguageCheckboxes) if (saved.audioLanguages && cb.dataset.lang in saved.audioLanguages) cb.checked = saved.audioLanguages[cb.dataset.lang];
-    for (const cb of formatCheckboxes) if (saved.formats && cb.dataset.format in saved.formats) cb.checked = saved.formats[cb.dataset.format];
   }
 
   function countActiveFilters() {
@@ -775,9 +776,52 @@ if (MATCHES.length) {
     const open = filtersPanel.classList.toggle('open');
     filtersToggle.setAttribute('aria-expanded', String(open));
   });
-  for (const cb of [filterLowAvail, ...weekdayCheckboxes, ...audioLanguageCheckboxes, ...formatCheckboxes]) {
+  for (const cb of [filterLowAvail, ...weekdayCheckboxes]) {
     cb.addEventListener('change', onFilterChange);
   }
+
+  // Audio and format chips list only values that occur in the showtimes
+  // (a field with fewer than two values is hidden). A rebuild keeps each
+  // chip's current state; a new value starts from the saved filter state,
+  // or checked.
+  function buildChips(field, container, values, cls, dataKey, savedKey, current) {
+    const saved = savedFilterState()[savedKey] || {};
+    const previous = Object.fromEntries(current.map(cb => [cb.dataset[dataKey], cb.checked]));
+    container.replaceChildren();
+    const boxes = values.map(value => {
+      const label = document.createElement('label');
+      label.className = 'chip';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = cls;
+      cb.dataset[dataKey] = value;
+      cb.checked = value in previous ? previous[value] : value in saved ? saved[value] : true;
+      cb.addEventListener('change', onFilterChange);
+      label.append(cb, ` ${value}`);
+      container.appendChild(label);
+      return cb;
+    });
+    field.hidden = values.length < 2;
+    return values.length < 2 ? [] : boxes;
+  }
+
+  function rebuildChips() {
+    const distinct = key => Array.from(new Set(MATCHES.map(m => m[key] || 'Unknown'))).sort();
+    audioLanguageCheckboxes = buildChips(
+      document.getElementById('audio-field'), document.getElementById('audio-chips'),
+      distinct('audio_language'), 'filter-audio-language', 'lang', 'audioLanguages', audioLanguageCheckboxes);
+    formatCheckboxes = buildChips(
+      document.getElementById('format-field'), document.getElementById('format-chips'),
+      distinct('format'), 'filter-format', 'format', 'formats', formatCheckboxes);
+  }
+
+  applyMatches = (matches) => {
+    MATCHES = matches;
+    showsUi.hidden = !MATCHES.length;
+    emptyState.hidden = !!MATCHES.length;
+    rebuildChips();
+    refresh();
+  };
   for (const input of [filterTimeFrom, filterTimeTo]) input.addEventListener('change', onFilterChange);
   for (const b of sortButtons) b.addEventListener('click', () => { sortMode = b.dataset.sort; onFilterChange(); });
   document.getElementById('filters-reset').addEventListener('click', resetFilters);
@@ -797,7 +841,7 @@ if (MATCHES.length) {
 
   loadFilterState();
   view = initialView();
-  refresh();
+  applyMatches(MATCHES);
 }
 </script>
 {% endblock %}

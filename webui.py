@@ -585,16 +585,10 @@ def movie_detail(movie_id):
     if movie is None:
         abort(404)
 
-    results = storage.load_results()
-    matches = [m for m in results["matches"] if m["movie_id"] == movie_id]
-    audio_languages = sorted({m.get("audio_language") or "Unknown" for m in matches})
-    format_options = sorted({m.get("format") or "Unknown" for m in matches})
     return render_template(
         "movie.html",
         movie=movie,
-        matches=matches,
-        audio_languages=audio_languages,
-        format_options=format_options,
+        matches=movie_matches(movie_id),
         all_formats=storage.FORMAT_OPTIONS,
         # Per-movie, not the global results.json timestamp: movies have
         # different check intervals.
@@ -604,6 +598,24 @@ def movie_detail(movie_id):
         cinemas=cinema_list(),
         ntfy_priority_options=storage.NTFY_PRIORITY_OPTIONS,
     )
+
+
+def movie_matches(movie_id: str) -> list[dict]:
+    return [m for m in storage.load_results()["matches"] if m["movie_id"] == movie_id]
+
+
+@app.route("/api/movies/<movie_id>/matches", methods=["GET"])
+def api_movie_matches(movie_id):
+    """What the movie page redraws itself from after a check, without a
+    page reload."""
+    config = storage.load_config()
+    movie = next((m for m in config["movies"] if m["id"] == movie_id), None)
+    if movie is None:
+        abort(404)
+    return jsonify({
+        "updated_at": storage.last_checked_at(movie, storage.load_state()),
+        "matches": movie_matches(movie_id),
+    })
 
 
 @app.route("/movies/<movie_id>/settings", methods=["POST"])

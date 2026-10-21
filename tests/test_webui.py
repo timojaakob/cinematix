@@ -167,3 +167,16 @@ def test_movie_settings_interval_is_sanitized(client):
     movie = storage.load_config()["movies"][0]
     assert movie["check_interval_seconds"] == 600
     assert movie["required_formats"] == ["IMAX"]
+
+
+def test_movie_matches_api(client):
+    finish_setup(client, password="secret123")
+    cfg = storage.load_config()
+    cfg["movies"] = [{"id": "m", "title": "Dune", "query": "dune", "check_interval_seconds": 120, "required_formats": ["IMAX"]}]
+    storage.save_config(cfg)
+    storage.save_results([{"event_id": "1", "movie_id": "m"}, {"event_id": "2", "movie_id": "other"}])
+    storage.save_state({"notified_event_ids": [], "last_checked": {"m": "2026-10-21T13:00:00"}})
+    data = client.get("/api/movies/m/matches").get_json()
+    assert data == {"updated_at": "2026-10-21T13:00:00", "matches": [{"event_id": "1", "movie_id": "m"}]}
+    assert client.get("/api/movies/nope/matches").status_code == 404
+    assert webui.app.test_client().get("/api/movies/m/matches").status_code == 401
