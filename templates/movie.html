@@ -171,7 +171,7 @@
         {% if movie.check_interval_seconds is none %}
           Checking is off for this movie. Turn it on in the movie settings.
         {% else %}
-          cinematix checks Cinema City Flora {{ interval_labels.get(movie.check_interval_seconds, 'regularly') | lower }}. You get a notification when a showtime appears.
+          cinematix checks {{ cinema_name }} {{ interval_labels.get(movie.check_interval_seconds, 'regularly') | lower }}. You get a notification when a showtime appears.
         {% endif %}
       </div>
       {% endif %}

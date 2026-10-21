@@ -1,0 +1,24 @@
+{# Layout for pages shown before login or setup: no settings dialog, no
+   service worker (it would cache the loading shell for a page the user
+   can't open yet). #}
+<!doctype html>
+<html lang="en">
+<head>
+{% include "_head.html" %}
+<title>{% block title %}cinematix{% endblock %}</title>
+</head>
+<body class="plain">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="brand">
+        <img class="brand-logo" src="{{ asset('logo.png') }}" alt="" width="36" height="36">
+        <span class="brand-word">cinematix</span>
+      </span>
+    </div>
+  </header>
+  <main class="wrap narrow">
+    {% block content %}{% endblock %}
+  </main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

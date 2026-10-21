@@ -1,0 +1,14 @@
+{% extends "_plain.html" %}
+{% block title %}Log in — cinematix{% endblock %}
+{% block content %}
+<h1 class="plain-title">Log in</h1>
+<form method="post" action="{{ url_for('login') }}" class="plain-form">
+  <input type="hidden" name="next" value="{{ next_path }}">
+  <div class="field">
+    <label class="field-label" for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+    {% if error %}<p class="hint error" role="alert">{{ error }}</p>{% endif %}
+  </div>
+  <button type="submit" class="btn btn-block">Log in</button>
+</form>
+{% endblock %}

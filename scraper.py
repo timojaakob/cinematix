@@ -1,26 +1,14 @@
 #!/usr/bin/env python3
 """
-Cinema City (cinemacity.cz) showtime/availability scraper.
+cinematix scraper: polls Cinema City's showtime feed for the cinema chosen
+in the web UI, matches showtimes against the monitored movies, and pushes
+ntfy notifications for new showtimes and freed-up seats.
 
-Polls the site's internal data-api-service JSON feed for a given cinema,
-looks for showtimes matching one or more movie title queries, and pushes an
-ntfy notification when a matching, non-sold-out showing appears (IMAX-only
-by default). State (which events we've already notified about) is kept
-in a small JSON file so we don't spam on every poll.
-
-The monitored movie list and IMAX requirement live in /data/config.json,
-editable at runtime via the companion webui.py without restarting this
-process (config is reloaded once per poll cycle). Every poll cycle also
-writes the full set of currently matching showtimes to /data/results.json
-so the web UI can display them.
-
-Schema and IMAX detection fully confirmed against live data on 2026-07-17:
-body.events[]/body.films[], soldOut, availabilityRatio, attributeIds,
-auditorium/auditoriumTinyName, bookingLink. IMAX screenings at Flora carry
-auditoriumTinyName="IMAX" (auditorium="IMAX VOLVO") and the "70-mm"
-attributeId — both used together for redundancy. /collections and
-/cinemas endpoints on this API do not exist (confirmed empty/404);
-/attributes does and was used to cross-check the full tag taxonomy.
+Reads config.json (movies and settings, reloaded every cycle so web UI
+changes apply without a restart). Writes state.json (what was already
+notified, seat baselines, sale times, per-movie last check) and
+results.json (current matches, shown by the web UI). The API client and
+parsing live in cinemacity.py.
 """
 
 import json
@@ -29,33 +17,18 @@ import os
 import sys
 import threading
 import time
-from datetime import date, datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta
 
 import requests
 from flask import Flask, request
 
+import cinemacity
 import storage
+from cinemacity import FetchError
+from version import __version__
 
-# --- Config (env vars) -------------------------------------------------
+# --- Advanced settings (env vars) ----------------------------------------
 
-CINEMA_ID = os.environ.get("CINEMA_ID", "1052")  # Praha Flora
-SITE_ID = os.environ.get("SITE_ID", "10101")  # CZ site code used in the API path
-# Confirmed live on 2026-07-17: the API accepts lang=en_US and returns film
-# names in English (e.g. "The Odyssey" instead of "Odyssea") for the same
-# events/auditoriums/booking links as cs_CZ — this lets movie match text
-# default straight to the TMDb title instead of needing a Czech translation.
-LANG = os.environ.get("LANG_CODE", "en_US")
-# Confirmed live on 2026-07-17 against a real IMAX screening (Odyssea,
-# 2026-07-17T20:30 at Flora): the IMAX auditorium reports
-# auditoriumTinyName="IMAX" (auditorium="IMAX VOLVO") AND carries the
-# "70-mm" attributeId. Both signals are used (OR'd) for redundancy in case
-# Cinema City ever changes the auditorium's display name.
-IMAX_ATTRIBUTE_TAG = os.environ.get("IMAX_ATTRIBUTE_TAG", "70-mm").strip().lower()
-IMAX_AUDITORIUM_TINY_NAME = os.environ.get("IMAX_AUDITORIUM_TINY_NAME", "imax").strip().lower()
-# Optional stricter override: exact full auditorium name match instead of
-# the tiny name / attribute signals above.
-IMAX_AUDITORIUM = os.environ.get("IMAX_AUDITORIUM", "").strip().lower()
 # Dates normally come from the site's date-list endpoint (see fetch_dates).
 # This many days get scanned one by one instead, only as a cross-check
 # (FULL_SCAN_INTERVAL_SECONDS) or as a fallback if that endpoint 404s
@@ -65,61 +38,37 @@ FALLBACK_RANGE_DAYS = int(os.environ.get("FALLBACK_RANGE_DAYS", "150"))
 DATES_LOOKAHEAD_DAYS = int(os.environ.get("DATES_LOOKAHEAD_DAYS", "365"))
 FULL_SCAN_INTERVAL_SECONDS = int(os.environ.get("FULL_SCAN_INTERVAL_SECONDS", "3600"))
 FALLBACK_SCAN_MIN_INTERVAL_SECONDS = int(os.environ.get("FALLBACK_SCAN_MIN_INTERVAL_SECONDS", "300"))
+# Notify again for an already-notified event when its availability rises by
+# more than this over the lowest value seen since the last notification -
+# catches screenings listed before going on sale, sold-out shows that
+# reopen, and seats released from expired baskets after a drop.
+# availabilityRatio has 4 decimals (checked live on 2026-10-21), fine
+# enough to show a single seat even in the IMAX hall, so the default 0
+# means "any returned seat".
+AVAILABILITY_RISE_THRESHOLD = float(os.environ.get("AVAILABILITY_RISE_THRESHOLD", "0"))
+OUTAGE_ALERT_AFTER_SECONDS = int(os.environ.get("OUTAGE_ALERT_AFTER_SECONDS", "300"))
+DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
+
+# --- Constants -----------------------------------------------------------
+
+# How often the loop wakes up. Each movie's own check_interval_seconds
+# (60 s minimum, see webui.CHECK_INTERVAL_OPTIONS) decides whether it's due.
+LOOP_TICK_SECONDS = 30
 # Stop the cycle after this many single-day HTTP failures in a row (a lone
 # bad day gets skipped instead of blocking every later date).
 MAX_CONSECUTIVE_DAY_FAILURES = 3
-# Notify again for an already-notified event when its availability rises by
-# more than this over the lowest value seen since the last notification -
-# catches screenings listed before going on sale (Dune: Part Three sat at
-# 0.0156 for weeks), sold-out shows that reopen, and seats released from
-# expired baskets after a drop. availabilityRatio has 4 decimals (checked
-# live on 2026-10-21), fine enough to show a single seat even in the IMAX
-# hall, so the default 0 means "any returned seat".
-AVAILABILITY_RISE_THRESHOLD = float(os.environ.get("AVAILABILITY_RISE_THRESHOLD", "0"))
-OUTAGE_ALERT_AFTER_SECONDS = int(os.environ.get("OUTAGE_ALERT_AFTER_SECONDS", "300"))
+BACKOFF_MIN_SECONDS = 60
 BACKOFF_MAX_SECONDS = 900
 CHECK_NOW_COOLDOWN_SECONDS = 15
-POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "120"))
-# Fallback only: the live endpoint is normally storage's settings.ntfy_endpoint,
-# editable at runtime via webui.py's settings dialog (see notify()'s callers).
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "media-server-timo-8k3p")
-NTFY_URL = os.environ.get("NTFY_URL", f"https://ntfy.sh/{NTFY_TOPIC}")
-WEBUI_URL = os.environ.get("WEBUI_URL", "https://cine.vfk.ovh")
-STATE_FILE = Path(os.environ.get("STATE_FILE", "/data/state.json"))
-DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
-# Internal-only control port (not published to the host) that webui.py hits
-# to trigger an immediate poll cycle instead of waiting for the interval.
-CONTROL_PORT = int(os.environ.get("CONTROL_PORT", "5001"))
-
-BASE_URL = (
-    f"https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/{SITE_ID}"
-    f"/film-events/in-cinema/{CINEMA_ID}/at-date/{{date}}"
-)
-DATES_URL = (
-    f"https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/{SITE_ID}"
-    f"/dates/in-cinema/{CINEMA_ID}/until/{{until}}"
-)
-CINEMA_PAGE_URL = f"https://www.cinemacity.cz/cinemas/flora/{CINEMA_ID}"
-# The booking site's own showtime endpoint, called by its order page before
-# any reCAPTCHA step. The film-events feed has no sale start time (its
-# compositeBookingLink.blockOnlineSales was false/null for all 378 Flora
-# showtimes on 2026-10-21), but this one does: confirmed live on 2026-10-21
-# that ticketSaleStart ("2026-10-20 09:00:00", Prague local time) matches
-# the Dune: Part Three drop. Times are Prague local time without an offset
-# and get compared with datetime.now(), so the container needs
-# TZ=Europe/Prague (as in the README's compose file).
-PRESENTATION_URL = "https://tickets.cinemacity.cz/api/presentations/{id}"
 # A sale start can still move until it passes, so recheck upcoming ones now
 # and then. Once a showtime is on sale it's never fetched again.
 PRESENTATION_REFRESH_SECONDS = 3600
 # Caps the extra requests a newly monitored movie with many showtimes causes;
 # the rest get fetched over the next cycles.
 PRESENTATION_FETCHES_PER_CYCLE = 40
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) cinematix/1.0",
-    "Accept": "application/json",
-}
+# Internal port webui.py calls to trigger an immediate check. Bound to
+# localhost: both processes run in the same container.
+CONTROL_PORT = 5001
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
@@ -128,27 +77,15 @@ logging.basicConfig(
 log = logging.getLogger("cinematix")
 
 
-# --- State ---------------------------------------------------------------
+# --- ntfy ----------------------------------------------------------------
 
-def load_state() -> dict:
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text())
-        except json.JSONDecodeError:
-            log.warning("State file corrupt, starting fresh")
-    return {"notified_event_ids": []}
-
-
-def save_state(state: dict) -> None:
-    storage._atomic_write(STATE_FILE, json.dumps(state))
-
-
-# --- ntfy ------------------------------------------------------------
-
-def notify(
-    title: str, message: str, url: str = None, priority: str = "urgent", ntfy_endpoint: str | None = None
-) -> bool:
-    endpoint = ntfy_endpoint or NTFY_URL
+def notify(title: str, message: str, url: str | None, priority: str, settings: dict) -> bool:
+    """True if the push went through, or if no ntfy endpoint is set up (so
+    nothing piles up to flood out once one is)."""
+    endpoint = settings.get("ntfy_endpoint")
+    if not endpoint:
+        log.warning("No ntfy endpoint set, not sending: %s", title)
+        return True
     headers = {"Title": title, "Priority": priority, "Tags": "movie_camera,tickets"}
     if url:
         headers["Click"] = url
@@ -162,136 +99,27 @@ def notify(
         return False
 
 
-def clean_booking_link(link: str | None) -> str | None:
-    """Raw bookingLink from the API is tickets.cinemacity.cz/api/order/{id};
-    the working link on the actual site drops the /api/ segment."""
-    if not link:
-        return link
-    return link.replace("tickets.cinemacity.cz/api/order/", "tickets.cinemacity.cz/order/")
+def public_url(settings: dict) -> str | None:
+    return settings.get("public_url") or None
 
 
-# --- Fetching / parsing --------------------------------------------------
-
-# Network errors and 5xx get retried after these delays. 403/429 never get
-# retried - hammering a rate limit or bot challenge is how you get banned.
-FETCH_RETRY_DELAYS_SECONDS = (2, 5)
-
-
-class FetchError(Exception):
-    """kind is one of:
-    network   - connection error/timeout after retries (we're offline)
-    blocked   - 403/429 or a Cloudflare challenge (back off, alert at once)
-    not_found - 404 (endpoint gone - API probably changed)
-    http      - any other HTTP error after retries
-    invalid   - response isn't the JSON shape we expect"""
-
-    def __init__(self, kind: str, message: str, status: int | None = None, retry_after: int | None = None):
-        super().__init__(message)
-        self.kind = kind
-        self.status = status
-        self.retry_after = retry_after
+def cinema_from(settings: dict) -> dict:
+    return {
+        "id": settings["cinema_id"],
+        "name": settings.get("cinema_name") or f"cinema {settings['cinema_id']}",
+        "link": settings.get("cinema_link") or "",
+    }
 
 
-def _retry_after_seconds(resp: requests.Response) -> int | None:
+# --- Sale times ------------------------------------------------------------
+
+def _seconds_since(iso: str | None, now: datetime) -> float:
+    if not iso:
+        return float("inf")
     try:
-        return int(resp.headers.get("Retry-After", ""))
+        return (now - datetime.fromisoformat(iso)).total_seconds()
     except ValueError:
-        return None
-
-
-def get_json(url: str, what: str) -> dict:
-    for attempt in range(len(FETCH_RETRY_DELAYS_SECONDS) + 1):
-        last_attempt = attempt == len(FETCH_RETRY_DELAYS_SECONDS)
-        try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
-        except requests.RequestException as e:
-            if not last_attempt:
-                time.sleep(FETCH_RETRY_DELAYS_SECONDS[attempt])
-                continue
-            raise FetchError("network", f"{what}: {e}")
-        if resp.status_code in (403, 429) or resp.headers.get("cf-mitigated"):
-            raise FetchError(
-                "blocked", f"{what}: HTTP {resp.status_code}", resp.status_code, _retry_after_seconds(resp)
-            )
-        if resp.status_code == 404:
-            raise FetchError("not_found", f"{what}: HTTP 404", 404)
-        if resp.status_code >= 500 and not last_attempt:
-            time.sleep(FETCH_RETRY_DELAYS_SECONDS[attempt])
-            continue
-        if resp.status_code >= 400:
-            raise FetchError("http", f"{what}: HTTP {resp.status_code}", resp.status_code)
-        try:
-            payload = resp.json()
-        except ValueError:
-            raise FetchError("invalid", f"{what}: non-JSON response (site may have changed)", resp.status_code)
-        if not isinstance(payload, dict):
-            raise FetchError("invalid", f"{what}: unexpected JSON shape")
-        return payload
-    raise AssertionError("unreachable")
-
-
-def fetch_day(day: str) -> dict:
-    """Raises FetchError. An empty day is a normal, successful result."""
-    return get_json(BASE_URL.format(date=day) + "?attr=&lang=" + LANG, day)
-
-
-def fetch_dates(until: str) -> list[str]:
-    """Dates with at least one screening (any film) at the cinema, from the
-    site's own date picker endpoint. Confirmed live on 2026-10-19: answers a
-    year ahead, ignores film filters, and has the same 60 s Cloudflare cache
-    (max-age=60) as film-events. Raises FetchError; an empty list counts as
-    invalid since a cinema always has *something* scheduled."""
-    payload = get_json(DATES_URL.format(until=until) + "?attr=&lang=" + LANG, "date list")
-    dates = (payload.get("body") or {}).get("dates")
-    if not isinstance(dates, list) or not dates:
-        raise FetchError("invalid", f"date list: empty or malformed ({str(payload)[:200]})")
-    try:
-        return sorted({date.fromisoformat(d).isoformat() for d in dates})
-    except (TypeError, ValueError):
-        raise FetchError("invalid", f"date list: malformed dates ({str(dates)[:200]})")
-
-
-def _booking_site_time(value) -> str | None:
-    """"2026-10-20 09:00:00" or "2026-10-20 09:00" -> "2026-10-20T09:00:00",
-    or None if malformed."""
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-        try:
-            return datetime.strptime(value, fmt).isoformat()
-        except (TypeError, ValueError):
-            pass
-    return None
-
-
-def fetch_sale_info(event_id: str) -> dict:
-    """Raises FetchError. The endpoint answers HTTP 200 even for errors, so
-    the body decides. Shapes seen live (Dune: Part Three, event 267914):
-    open:   {"presentation": {..., "ticketSaleStart": "2026-10-20 09:00:00"}}
-    locked: {"error": {"error": "TICKETING_NOT_STARTED", "data": "2026-10-20 09:00"}}
-            (2026-10-20, before the drop - no other data while locked)
-    bad id: {"error": {"error": "PRESENTATION_NOT_FOUND", "message": "Event not found"}}
-    Member-only presales may use other error codes (not seen yet) - those
-    get logged by the caller."""
-    what = f"presentation {event_id}"
-    payload = get_json(PRESENTATION_URL.format(id=event_id), what)
-    p = payload.get("presentation")
-    if isinstance(p, dict):
-        return {
-            "sale_start": _booking_site_time(p.get("ticketSaleStart")),
-            "sale_stop": _booking_site_time(p.get("ticketSaleStop")),
-            "member_only": bool(p.get("isMemberSaleOnly")),
-        }
-    err = payload.get("error")
-    if not isinstance(err, dict):
-        raise FetchError("invalid", f"{what}: unexpected JSON shape")
-    code = err.get("error")
-    if code == "TICKETING_NOT_STARTED":
-        sale_start = _booking_site_time(err.get("data"))
-        if not sale_start:
-            raise FetchError("invalid", f"{what}: locked, unreadable sale start {err.get('data')!r}")
-        # "locked" makes attach_sale_info fetch once more after the drop,
-        # for the fields only an open screening returns.
-        return {"sale_start": sale_start, "sale_stop": None, "member_only": False, "locked": True}
-    raise FetchError("invalid", f"{what}: {code or 'unknown error'} ({err.get('message')})")
+        return float("inf")
 
 
 def attach_sale_info(results: list[dict], state: dict, now: datetime, may_fetch: bool) -> None:
@@ -321,7 +149,7 @@ def attach_sale_info(results: list[dict], state: dict, now: datetime, may_fetch:
         todo = sorted({r["event_id"] for r in results if needs_fetch(r["event_id"])}, key=lambda e: e in cache)
         for eid in todo[:PRESENTATION_FETCHES_PER_CYCLE]:
             try:
-                cache[eid] = dict(fetch_sale_info(eid), checked_at=now_s)
+                cache[eid] = dict(cinemacity.fetch_sale_info(eid), checked_at=now_s)
             except FetchError as e:
                 if e.kind in ("network", "blocked"):
                     if e.kind == "blocked":
@@ -339,117 +167,7 @@ def attach_sale_info(results: list[dict], state: dict, now: datetime, may_fetch:
         r["member_only"] = info.get("member_only", False)
 
 
-def extract_events(payload: dict) -> list[dict]:
-    """
-    Try a few plausible response shapes. Vista/quickbook-style backends
-    usually wrap the real payload in a "body" key; some deployments return
-    it flat. Adjust here once you've seen a real response (run with
-    DEBUG=true and check the logs / mounted state dir).
-    """
-    if not payload:
-        return []
-    body = payload.get("body", payload)
-    events = body.get("events") or body.get("filmEvents") or []
-    films = {f.get("id"): f for f in (body.get("films") or [])}
-
-    normalized = []
-    for ev in events:
-        film = films.get(ev.get("filmId"), {})
-        movie_name = (film.get("name") or "").strip()
-        attrs = ev.get("attributeIds") or []
-        attrs_str = " ".join(str(a) for a in attrs).lower()
-        attrs_set = {str(a).lower() for a in attrs}
-        auditorium = (ev.get("auditorium") or "").lower()
-        auditorium_tiny = (ev.get("auditoriumTinyName") or "").lower()
-        availability = ev.get("availabilityRatio")
-
-        sold_out = bool(ev.get("soldOut", False))
-        if availability is not None and availability <= 0:
-            sold_out = True
-
-        if IMAX_AUDITORIUM:
-            is_imax = auditorium == IMAX_AUDITORIUM
-        else:
-            is_imax = (
-                auditorium_tiny == IMAX_AUDITORIUM_TINY_NAME
-                or IMAX_ATTRIBUTE_TAG in attrs_str
-            )
-
-        audio_language, audio_language_code, subtitle_language, subtitle_language_code = (
-            audio_and_subtitle_languages(ev.get("languages") or {})
-        )
-        format_ = detect_format(attrs_set, is_imax)
-
-        normalized.append(
-            {
-                "event_id": ev.get("id"),
-                "movie_name": movie_name,
-                "sold_out": sold_out,
-                "availability": availability,
-                "is_imax": is_imax,
-                "format": format_,
-                "auditorium": ev.get("auditorium"),
-                "auditorium_tiny": ev.get("auditoriumTinyName"),
-                "start_time": ev.get("eventDateTime"),
-                "booking_link": clean_booking_link(ev.get("bookingLink")),
-                "audio_language": audio_language,
-                "audio_language_code": audio_language_code,
-                "subtitle_language": subtitle_language,
-                "subtitle_language_code": subtitle_language_code,
-                "raw": ev if DEBUG else None,
-            }
-        )
-    return normalized
-
-
-def detect_format(attrs_set: set[str], is_imax: bool) -> str:
-    """One of storage.FORMAT_OPTIONS. Confirmed live on 2026-07-17 against
-    three weeks of real Flora listings: "3d" and "2d" are used as exact
-    attributeIds tags (never combined with IMAX in the data seen), so IMAX
-    takes priority since it's detected via the more specific auditorium/
-    70-mm signals in is_imax."""
-    if is_imax:
-        return "IMAX"
-    if "3d" in attrs_set:
-        return "3D"
-    return "2D"
-
-
-# Confirmed live on 2026-07-17: each event carries a "languages" object
-# ({"original": [...], "dubbed": [...], "voiceover": [...], "subtitles": [...]},
-# each a list of ISO 639-1 codes) independent of the film-level attributeIds
-# (which just list every language version offered across all showtimes, not
-# this specific one).
-LANGUAGE_NAMES = {
-    "en": "English", "cs": "Czech", "sk": "Slovak", "de": "German", "fr": "French",
-    "es": "Spanish", "it": "Italian", "pl": "Polish", "ru": "Russian", "hu": "Hungarian",
-    "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "pt": "Portuguese", "nl": "Dutch",
-    "sv": "Swedish", "no": "Norwegian", "da": "Danish", "fi": "Finnish", "uk": "Ukrainian",
-}
-
-
-def language_name(code: str | None) -> str | None:
-    if not code:
-        return None
-    return LANGUAGE_NAMES.get(code.lower(), code.upper())
-
-
-def audio_and_subtitle_languages(languages: dict) -> tuple[str | None, str | None, str | None, str | None]:
-    """What the audience actually hears is the dub/voiceover if one was
-    recorded for this showtime, otherwise the film's original audio.
-    Returns (audio_name, audio_code, subtitle_name, subtitle_code)."""
-    dubbed = languages.get("dubbed") or []
-    voiceover = languages.get("voiceover") or []
-    original = languages.get("original") or []
-    subtitles = languages.get("subtitles") or []
-
-    audio_codes = dubbed or voiceover or original
-    audio_code = audio_codes[0].lower() if audio_codes else None
-    subtitle_code = subtitles[0].lower() if subtitles else None
-    audio = language_name(audio_code)
-    subtitle = language_name(subtitle_code)
-    return audio, audio_code, subtitle, subtitle_code
-
+# --- Matching --------------------------------------------------------------
 
 def matching_movie(movie_name: str, movies: list[dict]) -> dict | None:
     """Longest matching query wins, so "dune: part three" claims
@@ -460,26 +178,19 @@ def matching_movie(movie_name: str, movies: list[dict]) -> dict | None:
     return max(matches, key=lambda m: len(m["query"]), default=None)
 
 
-def is_movie_due(movie: dict, now: datetime) -> bool:
+def is_movie_due(movie: dict, state: dict, now: datetime) -> bool:
     """check_interval_seconds of None means checking is turned off for this
     movie. A missing key (config predating this field) defaults to on."""
     interval = movie.get("check_interval_seconds", storage.DEFAULT_CHECK_INTERVAL_SECONDS)
     if interval is None:
         return False
-    last_checked_at = movie.get("last_checked_at")
-    if not last_checked_at:
-        return True
-    try:
-        last_checked = datetime.fromisoformat(last_checked_at)
-    except ValueError:
-        return True
-    return (now - last_checked).total_seconds() >= interval
+    return _seconds_since(storage.last_checked_at(movie, state), now) >= interval
 
 
 def process_day(
     day: str,
     payload: dict,
-    seen_auditoriums: set,
+    cinema: dict,
     movies: list[dict],
     due_ids: set[str],
     results: list[dict],
@@ -488,16 +199,7 @@ def process_day(
 ) -> None:
     if DEBUG:
         log.debug("Raw payload for %s:\n%s", day, json.dumps(payload, indent=2)[:3000])
-    events = extract_events(payload)
-    if not events:
-        log.debug("%s: no film-events", day)
-        return
-
-    for ev in events:
-        if ev["auditorium"]:
-            seen_auditoriums.add(ev["auditorium"])
-
-    for ev in events:
+    for ev in cinemacity.extract_events(payload):
         # Match against every configured movie, not just the due ones, so a
         # not-due "Dune: Part Three" isn't claimed by a due "dune" query.
         movie = matching_movie(ev["movie_name"], movies)
@@ -510,41 +212,40 @@ def process_day(
             continue
 
         eid = str(ev["event_id"])
-        link = ev["booking_link"] or (
-            f"{CINEMA_PAGE_URL}#/buy-tickets-by-cinema?in-cinema={CINEMA_ID}&at={day}&view-mode=list"
+        results.append(
+            {
+                "event_id": eid,
+                "movie_name": ev["movie_name"],
+                "movie_id": movie["id"],
+                "query": movie["query"],
+                "date": day,
+                "start_time": ev["start_time"],
+                "fetched_at": first_fetched_by_event.get(eid, fetched_at),
+                "auditorium": ev["auditorium"],
+                "availability": ev["availability"],
+                "sold_out": ev["sold_out"],
+                "is_imax": ev["is_imax"],
+                "format": ev["format"],
+                "booking_link": ev["booking_link"] or cinemacity.cinema_day_link(cinema, day),
+                "audio_language": ev["audio_language"],
+                "audio_language_code": ev["audio_language_code"],
+                "subtitle_language": ev["subtitle_language"],
+                "subtitle_language_code": ev["subtitle_language_code"],
+            }
         )
-        entry = {
-            "event_id": eid,
-            "movie_name": ev["movie_name"],
-            "movie_id": movie["id"],
-            "query": movie["query"],
-            "date": day,
-            "start_time": ev["start_time"],
-            "fetched_at": first_fetched_by_event.get(eid, fetched_at),
-            "auditorium": ev["auditorium"],
-            "availability": ev["availability"],
-            "sold_out": ev["sold_out"],
-            "is_imax": ev["is_imax"],
-            "format": ev["format"],
-            "booking_link": link,
-            "audio_language": ev["audio_language"],
-            "audio_language_code": ev["audio_language_code"],
-            "subtitle_language": ev["subtitle_language"],
-            "subtitle_language_code": ev["subtitle_language_code"],
-        }
-        results.append(entry)
         if ev["sold_out"]:
             log.info("%s: '%s' found but SOLD OUT (event %s)", day, ev["movie_name"], eid)
 
 
+# --- Notifications ---------------------------------------------------------
+
 def pick_notifications(fresh: list[dict], state: dict) -> list[dict]:
     """Which freshly fetched showtimes to notify about: never-notified ones
     that aren't sold out ("new"), plus already-notified ones whose
-    availability rose by more than AVAILABILITY_RISE_THRESHOLD over the lowest value
-    seen since their last notification ("more_seats"). The second case is
-    what catches a ticket drop on screenings that were already listed but
-    not bookable yet. Updates the low-water marks in state as a side effect;
-    the caller resets them for the events it actually notified about."""
+    availability rose by more than AVAILABILITY_RISE_THRESHOLD over the
+    lowest value seen since their last notification ("more_seats").
+    Updates the low-water marks in state as a side effect; the caller
+    resets them for the events it actually notified about."""
     notified = set(state["notified_event_ids"])
     baselines: dict[str, float] = state.setdefault("availability_baseline", {})
     picks = []
@@ -614,59 +315,63 @@ def push_picks(picks: list[dict], kind: str, settings: dict, now: datetime) -> b
     the caller may mark them as notified: True when the push went through
     or this case is turned off (so nothing floods through once it's turned
     back on), False when the push failed and should be retried next cycle."""
-    if kind == "new":
-        enabled_key, title, message = "notify_on_new_showtime", *summarize_new_showtimes(picks, now)
-    else:
-        enabled_key, title, message = "notify_on_more_seats", *summarize_more_seats(picks)
+    enabled_key = "notify_on_new_showtime" if kind == "new" else "notify_on_more_seats"
     if not settings.get(enabled_key, True):
         return True
+    title, message = summarize_new_showtimes(picks, now) if kind == "new" else summarize_more_seats(picks)
     # A single showtime opens its booking page straight from the push.
-    url = picks[0]["booking_link"] if len(picks) == 1 else WEBUI_URL
-    return notify(
-        title,
-        message,
-        url=url,
-        priority=settings.get(f"{enabled_key}_priority", "urgent"),
-        ntfy_endpoint=settings.get("ntfy_endpoint") or None,
-    )
+    url = picks[0]["booking_link"] if len(picks) == 1 else public_url(settings)
+    return notify(title, message, url, settings.get(f"{enabled_key}_priority", "urgent"), settings)
 
+
+# --- Poll cycle ------------------------------------------------------------
 
 CHECKING = threading.Event()
-# Movie ids actually included in the check cycle currently running - lets
-# /status report per-movie checking state instead of "is the scraper doing
-# *anything* right now", which used to make every movie's page show
-# "Checking..." whenever any other movie's cycle was running, including
-# ones with checking turned off entirely (see CHECKING_IDS reset below).
+# Movie ids in the check cycle currently running, so /status can report
+# per-movie checking state.
 CHECKING_IDS: set[str] = set()
-# Movie ids queued by webui.py's "Check now" button to force a check this
+# Movie ids queued by the web UI's "Check now" button to force a check this
 # cycle even if their own check_interval_seconds says they're not due yet.
 FORCE_CHECK_LOCK = threading.Lock()
 FORCE_CHECK_IDS: set[str] = set()
 
+# Per-event and per-cinema state that must not carry over to another cinema.
+CINEMA_SCOPED_STATE = (
+    "notified_event_ids", "availability_baseline", "sale_info", "last_dates",
+    "last_checked", "last_full_scan_at", "full_scan_pending_check",
+)
 
-def _seconds_since(iso: str | None, now: datetime) -> float:
-    if not iso:
-        return float("inf")
-    try:
-        return (now - datetime.fromisoformat(iso)).total_seconds()
-    except ValueError:
-        return float("inf")
+
+def switch_cinema(state: dict, cinema_id: str) -> None:
+    """A state.json from before 1.0 has no cinema_id; it belonged to the
+    cinema the migrated config now names, so it's kept. Any later change
+    drops the old cinema's showtimes and notification history."""
+    previous = state.get("cinema_id")
+    state["cinema_id"] = cinema_id
+    if previous is None or previous == cinema_id:
+        return
+    log.info("Cinema changed from %s to %s, starting fresh", previous, cinema_id)
+    for key in CINEMA_SCOPED_STATE:
+        state.pop(key, None)
+    state["notified_event_ids"] = []
+    storage.save_results([])
 
 
 def choose_dates(
-    state: dict, today: date, now: datetime, result_dates: set[str]
+    cinema_id: str, state: dict, now: datetime, result_dates: set[str]
 ) -> tuple[list[str], bool, FetchError | None]:
     """Returns (dates to fetch in order, whether the date list is complete
     enough to drop old showtimes on dates missing from it, error that should
     end the cycle). Always also fetches the previous valid list's future dates
     and every date we currently hold monitored showtimes for, so a short or
     flaky list can never hide a known screening."""
+    today = now.date()
     today_s = today.isoformat()
     previous = sorted({d for d in state.get("last_dates", []) if d >= today_s} | result_dates)
     full_scan_days = [(today + timedelta(days=i)).isoformat() for i in range(FALLBACK_RANGE_DAYS)]
     until = (today + timedelta(days=DATES_LOOKAHEAD_DAYS)).isoformat()
     try:
-        listed = [d for d in fetch_dates(until) if d >= today_s]
+        listed = [d for d in cinemacity.fetch_dates(cinema_id, until) if d >= today_s]
     except FetchError as e:
         if e.kind in ("network", "blocked"):
             return [], False, e
@@ -683,7 +388,7 @@ def choose_dates(
     dates = set(listed) | set(previous)
     if _seconds_since(state.get("last_full_scan_at"), now) >= FULL_SCAN_INTERVAL_SECONDS:
         # Hourly cross-check that the date list really covers every date
-        # with screenings (unverified assumption) - see run_once's warning.
+        # with screenings - see run_once's warning.
         state["last_full_scan_at"] = now.isoformat(timespec="seconds")
         state["full_scan_pending_check"] = listed
         dates |= set(full_scan_days)
@@ -691,7 +396,7 @@ def choose_dates(
 
 
 def handle_blocked(state: dict, err: FetchError, now: datetime) -> None:
-    backoff = min(max(state.get("backoff_seconds", 0) * 2, POLL_INTERVAL_SECONDS, 60), BACKOFF_MAX_SECONDS)
+    backoff = min(max(state.get("backoff_seconds", 0) * 2, BACKOFF_MIN_SECONDS), BACKOFF_MAX_SECONDS)
     if err.retry_after:
         backoff = max(backoff, err.retry_after)
     state["backoff_seconds"] = backoff
@@ -705,15 +410,13 @@ def update_health(state: dict, cycle_failed: bool, blocked: bool, now: datetime,
     OUTAGE_ALERT_AFTER_SECONDS), retried every cycle until it goes through
     (ntfy shares the network, so it can't get out during a full outage),
     and one recovery message once a cycle works again."""
-    endpoint = settings.get("ntfy_endpoint") or None
     if not cycle_failed:
         if state.get("failing_since"):
             down_min = round(_seconds_since(state["failing_since"], now) / 60)
             if state.get("outage_alert_sent"):
                 notify(
-                    "cinematix back online",
-                    f"Cinema City reachable again after {down_min} min.",
-                    url=WEBUI_URL, priority="default", ntfy_endpoint=endpoint,
+                    "cinematix back online", f"Cinema City reachable again after {down_min} min.",
+                    public_url(settings), "default", settings,
                 )
             log.info("Recovered after %s min", down_min)
         for key in ("failing_since", "outage_alert_sent", "backoff_seconds", "backoff_until", "blocked_status"):
@@ -730,11 +433,8 @@ def update_health(state: dict, cycle_failed: bool, blocked: bool, now: datetime,
         title = f"cinematix BLOCKED by Cinema City (HTTP {state['blocked_status']})"
     else:
         title = "cinematix can't reach Cinema City"
-    if notify(
-        title,
-        f"No successful check since {since}. Check for tickets manually.",
-        url=WEBUI_URL, priority="high", ntfy_endpoint=endpoint,
-    ):
+    if notify(title, f"No successful check since {since}. Check for tickets manually.",
+              public_url(settings), "high", settings):
         state["outage_alert_sent"] = True
 
 
@@ -744,13 +444,18 @@ def run_once(state: dict) -> None:
     try:
         config = storage.load_config()
         settings = config["settings"]
-        now = datetime.now()
+        if not storage.is_set_up(config):
+            log.debug("Not set up yet (no cinema chosen), skipping cycle")
+            return
+        cinema = cinema_from(settings)
+        switch_cinema(state, cinema["id"])
+        now = cinemacity.now()
         with FORCE_CHECK_LOCK:
             forced_ids = set(FORCE_CHECK_IDS)
             FORCE_CHECK_IDS.clear()
-        due_movies = [m for m in config["movies"] if m["id"] in forced_ids or is_movie_due(m, now)]
+        due_movies = [m for m in config["movies"] if m["id"] in forced_ids or is_movie_due(m, state, now)]
         if not due_movies:
-            log.debug("No movies due for a check this cycle (per-movie check_interval_seconds)")
+            storage.save_state(state)
             return
         if _seconds_since(state.get("backoff_until"), now) < 0:
             log.info("Backing off until %s (blocked earlier), skipping cycle", state["backoff_until"])
@@ -758,9 +463,7 @@ def run_once(state: dict) -> None:
         due_ids = {m["id"] for m in due_movies}
         CHECKING_IDS = set(due_ids)
 
-        today = date.today()
-        today_s = today.isoformat()
-        seen_auditoriums = set()
+        today_s = now.date().isoformat()
         results: list[dict] = []
         fetched_at = now.isoformat(timespec="seconds")
         # "Fetched" should read as when we *first* saw this event, not when
@@ -772,13 +475,13 @@ def run_once(state: dict) -> None:
         }
 
         result_dates = {r["date"] for r in previous_matches if (r.get("date") or "") >= today_s}
-        dates, list_complete, cycle_error = choose_dates(state, today, now, result_dates)
+        dates, list_complete, cycle_error = choose_dates(cinema["id"], state, now, result_dates)
         fetched_days: set[str] = set()
         days_with_events: set[str] = set()
         consecutive_failures = 0
         for day in dates:
             try:
-                payload = fetch_day(day)
+                payload = cinemacity.fetch_day(cinema["id"], day)
             except FetchError as e:
                 if e.kind in ("network", "blocked"):
                     cycle_error = e
@@ -791,11 +494,10 @@ def run_once(state: dict) -> None:
                 continue
             consecutive_failures = 0
             fetched_days.add(day)
-            if extract_events(payload):
+            if cinemacity.extract_events(payload):
                 days_with_events.add(day)
             process_day(
-                day, payload, seen_auditoriums, config["movies"], due_ids, results,
-                fetched_at, first_fetched_by_event,
+                day, payload, cinema, config["movies"], due_ids, results, fetched_at, first_fetched_by_event,
             )
         if cycle_error:
             log.warning("Cycle stopped early (%s), keeping previous results for unfetched days", cycle_error)
@@ -804,8 +506,6 @@ def run_once(state: dict) -> None:
         attach_sale_info(
             results, state, now, may_fetch=not (cycle_error and cycle_error.kind in ("network", "blocked"))
         )
-        if seen_auditoriums:
-            log.debug("Auditoriums seen this cycle: %s", sorted(seen_auditoriums))
         listed_at_scan = state.pop("full_scan_pending_check", None)
         if listed_at_scan is not None and not cycle_error:
             missing = sorted(days_with_events - set(listed_at_scan))
@@ -850,7 +550,9 @@ def run_once(state: dict) -> None:
         # retries right away; a few skipped bad days don't.
         cycle_failed = bool(cycle_error and cycle_error.kind in ("network", "blocked"))
         if not cycle_failed:
-            storage.mark_movies_checked(due_ids, now.isoformat(timespec="seconds"))
+            last_checked = state.setdefault("last_checked", {})
+            for movie_id in due_ids:
+                last_checked[movie_id] = fetched_at
 
         # Notify about whatever was found even if the cycle failed partway -
         # a broken later day must never hold back a ticket drop.
@@ -862,7 +564,7 @@ def run_once(state: dict) -> None:
             # silently dropped.
             if group and push_picks(group, kind, settings, now):
                 for p in group:
-                    if p["notify_kind"] == "new":
+                    if kind == "new":
                         state["notified_event_ids"].append(p["event_id"])
                     if p["availability"] is not None:
                         state["availability_baseline"][p["event_id"]] = p["availability"]
@@ -870,17 +572,18 @@ def run_once(state: dict) -> None:
         live_ids = {r["event_id"] for r in combined}
         for key in ("availability_baseline", "sale_info"):
             state[key] = {k: v for k, v in state.get(key, {}).items() if k in live_ids}
+        state["last_checked"] = {k: v for k, v in state.get("last_checked", {}).items() if k in configured_ids}
 
         update_health(state, cycle_failed, blocked, now, settings)
-        save_state(state)
+        storage.save_state(state)
     finally:
         CHECKING.clear()
         CHECKING_IDS = set()
 
 
 def start_control_server(wake_event: threading.Event) -> None:
-    """Internal-only HTTP control port so webui.py can wake the poll loop
-    early instead of waiting out the full interval."""
+    """Internal HTTP control port so webui.py can wake the poll loop early
+    instead of waiting out the full interval."""
     control_app = Flask(__name__)
     control_app.logger.disabled = True
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
@@ -910,25 +613,22 @@ def start_control_server(wake_event: threading.Event) -> None:
             return {"checking": movie_id in CHECKING_IDS}
         return {"checking": CHECKING.is_set()}
 
-    control_app.run(host="0.0.0.0", port=CONTROL_PORT)
+    control_app.run(host="127.0.0.1", port=CONTROL_PORT)
 
 
 def main() -> None:
     config = storage.load_config()
-    titles = [m["title"] for m in config["movies"]]
-    log.info(
-        "Starting cinematix: cinema=%s movies=%r interval=%ss",
-        CINEMA_ID, titles, POLL_INTERVAL_SECONDS,
-    )
-    state = load_state()
     settings = config["settings"]
-    if settings.get("notify_on_start", True):
+    titles = [m["title"] for m in config["movies"]]
+    log.info("Starting cinematix %s: cinema=%s movies=%r", __version__, settings.get("cinema_id") or "-", titles)
+    state = storage.load_state()
+    if storage.is_set_up(config) and settings.get("notify_on_start", True):
         notify(
             "cinematix started",
-            f"Monitoring for {', '.join(titles) or 'nothing yet'} at Praha Flora",
-            url=WEBUI_URL,
-            priority=settings.get("notify_on_start_priority", "low"),
-            ntfy_endpoint=settings.get("ntfy_endpoint") or None,
+            f"Monitoring {', '.join(titles) or 'nothing yet'} at {cinema_from(settings)['name']}",
+            public_url(settings),
+            settings.get("notify_on_start_priority", "low"),
+            settings,
         )
 
     wake_event = threading.Event()
@@ -939,7 +639,7 @@ def main() -> None:
             run_once(state)
         except Exception:
             log.exception("Unhandled error during poll cycle")
-        wake_event.wait(POLL_INTERVAL_SECONDS)
+        wake_event.wait(LOOP_TICK_SECONDS)
         wake_event.clear()
 
 

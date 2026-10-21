@@ -21,6 +21,19 @@
 
         <div class="field">
           <div class="field-row">
+            <label class="field-label" for="cinema-select">Cinema</label>
+            <select id="cinema-select" name="cinema_id">
+              {% if not cinemas %}<option value="{{ settings.cinema_id }}" selected>{{ settings.cinema_name or settings.cinema_id }}</option>{% endif %}
+              {% for c in cinemas %}
+              <option value="{{ c.id }}" {% if settings.cinema_id == c.id %}selected{% endif %}>{{ c.name.split(",")[0] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="hint">Changing the cinema clears the current showtimes and checks the new cinema right away.</p>
+        </div>
+
+        <div class="field">
+          <div class="field-row">
             <label class="field-label" for="default-view-select">Open movies in</label>
             <select id="default-view-select" name="default_view">
               <option value="list" {% if settings.default_view == 'list' %}selected{% endif %}>List</option>
@@ -106,9 +119,36 @@
           </div>
         </div>
 
+        <div class="field">
+          <label class="field-label" for="public_url">Address of this app</label>
+          <input type="text" id="public_url" name="public_url" value="{{ settings.public_url }}" placeholder="https://cinematix.example.com" autocomplete="off" spellcheck="false" inputmode="url">
+          <p class="hint">Tapping a notification about several showtimes opens this address.</p>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="new_password">{{ 'Change password' if has_password else 'Password' }}</label>
+          <input type="password" id="new_password" name="new_password" minlength="8" autocomplete="new-password" placeholder="{{ 'New password' if has_password else 'Optional, at least 8 characters' }}">
+          {% if has_password %}
+          <div class="field-row" style="margin-top:10px">
+            <label class="switch">
+              <input type="checkbox" name="remove_password">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span>Remove the password</span>
+            </label>
+          </div>
+          {% else %}
+          <p class="hint">Without a password, anyone who can open this address can change the settings.</p>
+          {% endif %}
+        </div>
+
         <div class="modal-actions">
           <button id="global-settings-apply-btn" type="submit" class="btn btn-primary-wide" disabled>Save settings</button>
         </div>
       </form>
+      {% if has_password %}
+      <form method="post" action="{{ url_for('logout') }}" class="modal-actions">
+        <button type="submit" class="btn btn-quiet">Log out</button>
+      </form>
+      {% endif %}
     </div>
   </div>

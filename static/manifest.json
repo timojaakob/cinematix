@@ -1,7 +1,7 @@
 {
   "name": "cinematix",
   "short_name": "cinematix",
-  "description": "Showtime and ticket alerts for Cinema City Flora",
+  "description": "Showtime and ticket alerts for Cinema City",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -1,39 +1,37 @@
-#!/usr/bin/env python3
 """
-Shared JSON storage for cinematix: the monitored-movie config and the
-latest scrape results. Used by both scraper.py (writer of results, reader of
-config) and webui.py (writer of config, reader of results).
+Everything cinematix keeps on disk, all in DATA_DIR:
+
+- config.json  - movies and settings. Written only by webui.py.
+- state.json   - scraper bookkeeping (notified events, seat baselines, sale
+                 times, per-movie last check). Written only by scraper.py.
+- results.json - the latest matching showtimes. Written only by scraper.py.
+- secret_key   - signs the web UI's login session.
+
+One writer per file, so the two processes can't overwrite each other's
+read-modify-write.
 """
 
 import json
 import logging
 import os
+import secrets
 import uuid
-from datetime import datetime
 from pathlib import Path
+
+import cinemacity
 
 log = logging.getLogger("cinematix")
 
-CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", "/data/config.json"))
-RESULTS_FILE = Path(os.environ.get("RESULTS_FILE", "/data/results.json"))
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+CONFIG_FILE = DATA_DIR / "config.json"
+RESULTS_FILE = DATA_DIR / "results.json"
+STATE_FILE = DATA_DIR / "state.json"
+SECRET_FILE = DATA_DIR / "secret_key"
 
-DEFAULT_MOVIE_QUERIES = [
-    q.strip().lower() for q in os.environ.get("MOVIE_QUERY", "dune").split(",") if q.strip()
-]
-# Formats scraper.py can distinguish at this cinema (see detect_format() and
-# its docstring for how each is identified from the live API's attribute
-# tags). A movie's required_formats is a subset of this list; empty means no
-# format is wanted, so the movie matches nothing until the user picks at
-# least one - see the format filtering in scraper.py's check_date().
-FORMAT_OPTIONS = ["IMAX", "3D", "2D"]
-# Historical env var: used only as the one-time default for required_formats
-# on movies that predate that field (see load_config()'s migration) and for
-# MOVIE_QUERY-seeded movies on a fresh config. There is no live global toggle
-# anymore - each movie now picks its own required formats.
-DEFAULT_REQUIRE_IMAX = os.environ.get("REQUIRE_IMAX", "true").lower() == "true"
-DEFAULT_REQUIRED_FORMATS = ["IMAX"] if DEFAULT_REQUIRE_IMAX else []
-# Matches scraper.py's own default POLL_INTERVAL_SECONDS, so a freshly added
-# movie is checked on every poll cycle unless the user slows it down.
+# Formats scraper.py can tell apart (see cinemacity.detect_format). A
+# movie's required_formats is a subset of this list; empty means the movie
+# matches nothing until the user picks at least one.
+FORMAT_OPTIONS = ["IMAX", "4DX", "Superscreen", "VIP", "3D", "2D"]
 DEFAULT_CHECK_INTERVAL_SECONDS = 120
 
 # ntfy's own priority levels (https://docs.ntfy.sh/publish/#message-priority).
@@ -41,15 +39,14 @@ NTFY_PRIORITY_OPTIONS = ["min", "low", "default", "high", "urgent"]
 
 VIEW_OPTIONS = ["list", "calendar"]
 
-# Global settings, editable at runtime via webui.py's settings dialog and
-# read fresh each poll cycle by scraper.py. tmdb_api_key/ntfy_endpoint start
-# blank here (not env-seeded) deliberately: TMDB_API_KEY only reaches the
-# web container and NTFY_TOPIC/NTFY_URL only reach the scraper container, so
-# whichever process ran the config migration first would otherwise "win"
-# with just its own half of the env vars. Instead each side falls back to
-# its own env var only at the point of use, when the stored value is empty
-# - see webui.py's get_tmdb_api_key() and scraper.py's notify() callers.
+# All set in the web UI (the first-run wizard, then the settings dialog).
+# An empty cinema_id means setup hasn't been completed.
 DEFAULT_SETTINGS = {
+    "cinema_id": "",
+    "cinema_name": "",
+    "cinema_link": "",
+    "public_url": "",
+    "password_hash": "",
     "tmdb_api_key": "",
     "ntfy_endpoint": "",
     "notify_on_start": True,
@@ -65,116 +62,67 @@ DEFAULT_SETTINGS = {
 
 def _atomic_write(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Unique per call: webui.py and scraper.py are separate processes that
-    # can both write this file around the same time (e.g. both running a
-    # config migration on startup). A shared tmp filename lets their writes
-    # interleave before either renames, corrupting the file - .replace()
-    # itself is atomic, but only if each writer has its own tmp file.
+    # Unique per call, so two writers never share a tmp file. .replace()
+    # itself is atomic.
     tmp = path.with_suffix(f".tmp-{uuid.uuid4().hex[:8]}")
     tmp.write_text(payload)
     tmp.replace(path)
 
 
-def _default_config() -> dict:
+def _read_json(path: Path, default):
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError:
+            log.warning("%s is corrupt, starting fresh", path.name)
+    return default
+
+
+# --- config.json -----------------------------------------------------------
+
+def _legacy_env_settings() -> dict:
+    """Before 1.0 the cinema, TMDb key, ntfy topic and web UI URL came from
+    env vars, and the cinema was Prague Flora unless CINEMA_ID said
+    otherwise. A config from then has no cinema_id key; it gets these once
+    so an upgraded install keeps working without the setup wizard."""
+    env = os.environ
+    ntfy = env.get("NTFY_URL") or (f"https://ntfy.sh/{env['NTFY_TOPIC']}" if env.get("NTFY_TOPIC") else "")
     return {
-        "movies": [
-            {
-                "id": f"legacy-{q}",
-                "tmdb_id": None,
-                "imdb_id": None,
-                "title": q,
-                "query": q,
-                "poster_url": None,
-                "overview": None,
-                "runtime": None,
-                "release_date": None,
-                "rating": None,
-                "added_at": None,
-                "check_interval_seconds": DEFAULT_CHECK_INTERVAL_SECONDS,
-                "last_checked_at": None,
-                "required_formats": list(DEFAULT_REQUIRED_FORMATS),
-            }
-            for q in DEFAULT_MOVIE_QUERIES
-        ],
-        "settings": dict(DEFAULT_SETTINGS),
+        "cinema_id": env.get("CINEMA_ID", "1052"),
+        "tmdb_api_key": env.get("TMDB_API_KEY", ""),
+        "ntfy_endpoint": ntfy,
+        "public_url": env.get("WEBUI_URL", ""),
     }
 
 
 def load_config() -> dict:
-    if not CONFIG_FILE.exists():
-        cfg = _default_config()
-        save_config(cfg)
-        return cfg
-
-    try:
-        raw = json.loads(CONFIG_FILE.read_text())
-    except json.JSONDecodeError:
-        log.warning("Config file corrupt, falling back to defaults")
-        cfg = _default_config()
-        save_config(cfg)
-        return cfg
-
-    # A movie's required_formats might be missing (config predating that
-    # field) or its old global equivalent might still be sitting in the
-    # top-level "require_imax" key - both get carried forward here so the
-    # migration only has to run once per movie.
-    legacy_required_formats = ["IMAX"] if raw.get("require_imax", DEFAULT_REQUIRE_IMAX) else []
-
-    if "movies" not in raw and "movie_queries" in raw:
-        # Migrate the old flat-query-list schema to movie objects.
-        queries = [q.strip().lower() for q in raw.get("movie_queries", []) if q.strip()]
-        cfg = {
-            "movies": [
-                {
-                    "id": f"legacy-{q}",
-                    "tmdb_id": None,
-                    "imdb_id": None,
-                    "title": q,
-                    "query": q,
-                    "poster_url": None,
-                    "overview": None,
-                    "runtime": None,
-                    "release_date": None,
-                    "rating": None,
-                    "added_at": None,
-                    "check_interval_seconds": DEFAULT_CHECK_INTERVAL_SECONDS,
-                    "last_checked_at": None,
-                    "required_formats": list(legacy_required_formats),
-                }
-                for q in queries
-            ],
-            "settings": dict(DEFAULT_SETTINGS),
-        }
-        save_config(cfg)
-        return cfg
+    raw = _read_json(CONFIG_FILE, None)
+    if not isinstance(raw, dict):
+        return {"movies": [], "settings": dict(DEFAULT_SETTINGS)}
 
     movies = raw.get("movies", [])
-    changed = "require_imax" in raw
     for m in movies:
-        if "required_formats" not in m:
-            m["required_formats"] = list(legacy_required_formats)
-            changed = True
-
-    # Missing keys (config predating global settings, or one added since)
-    # are backfilled from defaults so callers never have to guard for them.
-    settings = {**DEFAULT_SETTINGS, **raw.get("settings", {})}
-    if settings != raw.get("settings"):
-        changed = True
-
-    cfg = {"movies": movies, "settings": settings}
-    if changed:
-        save_config(cfg)
-    return cfg
+        # Configs from before per-movie formats wanted IMAX.
+        m.setdefault("required_formats", ["IMAX"])
+    stored = raw.get("settings", {})
+    settings = {**DEFAULT_SETTINGS, **stored}
+    if "cinema_id" not in stored:
+        for key, value in _legacy_env_settings().items():
+            if not settings.get(key):
+                settings[key] = value
+    return {"movies": movies, "settings": settings}
 
 
 def save_config(cfg: dict) -> None:
     _atomic_write(CONFIG_FILE, json.dumps(cfg, indent=2))
 
 
+def is_set_up(cfg: dict) -> bool:
+    return bool(cfg["settings"].get("cinema_id"))
+
+
 def add_movie(cfg: dict, movie: dict) -> dict:
-    movies = [m for m in cfg["movies"] if m["id"] != movie["id"]]
-    movies.append(movie)
-    cfg["movies"] = movies
+    cfg["movies"] = [m for m in cfg["movies"] if m["id"] != movie["id"]] + [movie]
     save_config(cfg)
     return cfg
 
@@ -202,35 +150,49 @@ def update_movie_settings(
 
 
 def update_settings(cfg: dict, updates: dict) -> dict:
-    cfg.setdefault("settings", dict(DEFAULT_SETTINGS))
     cfg["settings"].update(updates)
     save_config(cfg)
     return cfg
 
 
-def mark_movies_checked(movie_ids: set[str], when: str) -> None:
-    """Called by scraper.py after a poll cycle to record which movies were
-    actually checked, so per-movie check_interval_seconds can be honored on
-    the next cycle. Reloads config right before writing to keep the
-    read-modify-write window with webui.py's own config writes short."""
-    if not movie_ids:
-        return
-    cfg = load_config()
-    for m in cfg["movies"]:
-        if m["id"] in movie_ids:
-            m["last_checked_at"] = when
-    save_config(cfg)
+# --- state.json --------------------------------------------------------------
 
+def load_state() -> dict:
+    state = _read_json(STATE_FILE, {})
+    state.setdefault("notified_event_ids", [])
+    return state
+
+
+def save_state(state: dict) -> None:
+    _atomic_write(STATE_FILE, json.dumps(state))
+
+
+def last_checked_at(movie: dict, state: dict) -> str | None:
+    # Before 1.0 this lived on the movie in config.json.
+    return state.get("last_checked", {}).get(movie["id"]) or movie.get("last_checked_at")
+
+
+# --- results.json ------------------------------------------------------------
 
 def load_results() -> dict:
-    if RESULTS_FILE.exists():
-        try:
-            return json.loads(RESULTS_FILE.read_text())
-        except json.JSONDecodeError:
-            pass
-    return {"updated_at": None, "matches": []}
+    return _read_json(RESULTS_FILE, {"updated_at": None, "matches": []})
 
 
 def save_results(results: list[dict]) -> None:
-    payload = {"updated_at": datetime.now().isoformat(timespec="seconds"), "matches": results}
+    payload = {"updated_at": cinemacity.now().isoformat(timespec="seconds"), "matches": results}
     _atomic_write(RESULTS_FILE, json.dumps(payload, indent=2))
+
+
+# --- secret_key --------------------------------------------------------------
+
+def secret_key() -> str:
+    """Created once with O_EXCL, so concurrent first starts agree on it."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return SECRET_FILE.read_text().strip()
+    with os.fdopen(fd, "w") as f:
+        key = secrets.token_hex(32)
+        f.write(key)
+    return key

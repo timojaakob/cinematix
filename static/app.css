@@ -542,3 +542,30 @@ html[data-shell="index"] .sk-movie { display: none; }
 html[data-films="1"] .sk-index .films li:nth-child(n+2),
 html[data-films="2"] .sk-index .films li:nth-child(n+3),
 html[data-films="3"] .sk-index .films li:nth-child(n+4) { display: none; }
+
+/* ---------- plain pages (login, first-run setup) ---------- */
+.wrap.narrow { max-width: 560px; }
+.plain-title { font-size: 1.8rem; margin-bottom: 6px; }
+.plain-lead { margin-bottom: 18px; }
+.plain-form h2 { font-size: 1.25rem; margin: 8px 0 6px; }
+.plain-form a { color: inherit; }
+.plain-form code { font-size: 0.95em; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); word-break: break-all; }
+.btn-block { width: 100%; margin-top: 8px; }
+select.block { width: 100%; }
+.how-to { padding-left: 1.3em; margin: 8px 0 4px; }
+.how-to li { margin: 4px 0; }
+.qr { display: block; margin: 14px 0 4px; border-radius: 12px; background: #fff; }
+
+.steps { display: flex; gap: 6px; list-style: none; padding: 0; margin: 0 0 18px; counter-reset: step; }
+.steps li {
+  flex: 1 1 0; min-width: 0; padding-top: 8px; border-top: 4px solid var(--line-strong);
+  font-size: 0.8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.steps li.done { border-color: var(--good); }
+.steps li.active { border-color: var(--brand); color: var(--text); font-weight: 700; }
+html:not(.steps-js) .steps { display: none; }
+.step-actions { display: flex; gap: 10px; margin-top: 18px; }
+.step-actions .btn:not(.btn-quiet) { margin-left: auto; min-width: 140px; }
+.step-actions [hidden] { display: none; }
+html:not(.steps-js) #step-next, html:not(.steps-js) #step-back { display: none; }
+.field-row select { min-width: 0; max-width: 62%; text-overflow: ellipsis; }
