@@ -251,7 +251,7 @@ async function addMovie(tmdbId, requiredFormats) {
     try {
       sessionStorage.setItem('cc-just-added', data.movie.id);
     } catch (e) { /* storage unavailable (private mode, quota, ...) */ }
-    cxReload();
+    cxReload({ keepScroll: false });
     return;
   }
   const data = resp ? await resp.json().catch(() => ({})) : {};
