@@ -1,0 +1,7 @@
+{
+ "error": {
+  "error": "TICKETING_NOT_STARTED",
+  "data": "2026-10-20 09:00",
+  "message": "Ticket sales for the Session has not yet Started"
+ }
+}

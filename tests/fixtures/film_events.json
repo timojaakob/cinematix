@@ -1,0 +1,345 @@
+{
+ "body": {
+  "films": [
+   {
+    "id": "7268s2r",
+    "name": "The Odyssey",
+    "length": 180,
+    "posterLink": "https://www.cinemacity.cz/xmedia-cw/repo/feats/posters/7268S2R.jpg",
+    "videoLink": null,
+    "link": "https://www.cinemacity.cz/films/odyssea/7268s2r",
+    "weight": 0,
+    "releaseYear": "2026",
+    "releaseDate": "2026-07-16T00:00:00",
+    "attributeIds": [
+     "15-plus",
+     "2d",
+     "70-mm",
+     "drama",
+     "first-subbed-lang-cs",
+     "history",
+     "subbed"
+    ]
+   },
+   {
+    "id": "8352s2r",
+    "name": "Coyote vs. Acme",
+    "length": 101,
+    "posterLink": "https://www.cinemacity.cz/xmedia-cw/repo/feats/posters/8352S2R.jpg",
+    "videoLink": "https://www.youtube.com/watch?v=yz2FHkJnp0Y",
+    "link": "https://www.cinemacity.cz/films/kojot-vraci-uder/8352s2r",
+    "weight": 0,
+    "releaseYear": "2026",
+    "releaseDate": "2026-09-17T00:00:00",
+    "attributeIds": [
+     "2d",
+     "adventure",
+     "animation",
+     "comedy",
+     "dubbed",
+     "dubbed-lang-cs",
+     "family",
+     "suitable-for-all"
+    ]
+   },
+   {
+    "id": "8333s2r",
+    "name": "Whalefall",
+    "length": 106,
+    "posterLink": "https://www.cinemacity.cz/xmedia-cw/repo/feats/posters/8333S2R.jpg",
+    "videoLink": "https://www.youtube.com/watch?v=m6uSpWZHOyA",
+    "link": "https://www.cinemacity.cz/films/velrybi-pad/8333s2r",
+    "weight": 0,
+    "releaseYear": "2026",
+    "releaseDate": "2026-10-15T00:00:00",
+    "attributeIds": [
+     "15-plus",
+     "2d",
+     "4dx",
+     "adventure",
+     "first-subbed-lang-cs",
+     "laser-barco",
+     "subbed",
+     "thriller",
+     "vip"
+    ]
+   },
+   {
+    "id": "8182s2r",
+    "name": "Street Fighter",
+    "length": 125,
+    "posterLink": "https://www.cinemacity.cz/xmedia-cw/repo/feats/posters/8182S2R.jpg",
+    "videoLink": "https://www.youtube.com/watch?v=iquFQJAVuYs",
+    "link": "https://www.cinemacity.cz/films/street-fighter/8182s2r",
+    "weight": 0,
+    "releaseYear": "2026",
+    "releaseDate": "2026-10-15T00:00:00",
+    "attributeIds": [
+     "12-plus",
+     "2d",
+     "4dx",
+     "action",
+     "comedy",
+     "dolby-atmos",
+     "first-subbed-lang-cs",
+     "laser-barco",
+     "subbed",
+     "vip"
+    ]
+   },
+   {
+    "id": "5021o2sx4",
+    "name": "HYBE CHEERING PARTY",
+    "length": 60,
+    "posterLink": "https://www.cinemacity.cz/xmedia-cw/repo/feats/posters/5021O2SX4.jpg",
+    "videoLink": null,
+    "link": "https://www.cinemacity.cz/films/hybe-cheering-party/5021o2sx4",
+    "weight": 0,
+    "releaseYear": "2026",
+    "releaseDate": "2026-10-24T00:00:00",
+    "attributeIds": [
+     "12-plus",
+     "3d",
+     "concert-film",
+     "first-subbed-lang-en",
+     "laser-barco",
+     "subbed"
+    ]
+   }
+  ],
+  "events": [
+   {
+    "id": "264433",
+    "filmId": "7268s2r",
+    "cinemaId": "1052",
+    "businessDay": "2026-10-21",
+    "eventDateTime": "2026-10-21T14:00:00",
+    "attributeIds": [
+     "15-plus",
+     "2d",
+     "70-mm",
+     "drama",
+     "first-subbed-lang-cs",
+     "history",
+     "subbed"
+    ],
+    "languages": {
+     "original": [
+      "en"
+     ],
+     "dubbed": [],
+     "voiceover": [],
+     "subtitles": [
+      "cs"
+     ]
+    },
+    "bookingLink": "https://tickets.cinemacity.cz/api/order/264433?lang=en",
+    "compositeBookingLink": {
+     "type": "PG",
+     "bookingUrl": {
+      "url": "https://tickets.cinemacity.cz/api/order/264433",
+      "params": {
+       "lang": "en-GB"
+      }
+     },
+     "obsoleteBookingUrl": "https://tickets.cinemacity.cz/api/order/264433?lang=en",
+     "blockOnlineSales": false,
+     "blockOnlineSalesUntil": null,
+     "serviceUrl": "https://www.cinemacity.cz/booking"
+    },
+    "bookingRouterLaunchLink": "https://www.cinemacity.cz/cz/booking-router/launch/1052/264433?lang=en",
+    "presentationCode": "264433",
+    "soldOut": false,
+    "availabilityRatio": 0.5532,
+    "auditorium": "IMAX VOLVO",
+    "auditoriumTinyName": "IMAX"
+   },
+   {
+    "id": "264461",
+    "filmId": "8352s2r",
+    "cinemaId": "1052",
+    "businessDay": "2026-10-21",
+    "eventDateTime": "2026-10-21T14:00:00",
+    "attributeIds": [
+     "2d",
+     "adventure",
+     "animation",
+     "comedy",
+     "dubbed",
+     "dubbed-lang-cs",
+     "family",
+     "suitable-for-all"
+    ],
+    "languages": {
+     "original": [
+      "en"
+     ],
+     "dubbed": [
+      "cs"
+     ],
+     "voiceover": [],
+     "subtitles": []
+    },
+    "bookingLink": "https://tickets.cinemacity.cz/api/order/264461?lang=en",
+    "compositeBookingLink": {
+     "type": "PG",
+     "bookingUrl": {
+      "url": "https://tickets.cinemacity.cz/api/order/264461",
+      "params": {
+       "lang": "en-GB"
+      }
+     },
+     "obsoleteBookingUrl": "https://tickets.cinemacity.cz/api/order/264461?lang=en",
+     "blockOnlineSales": false,
+     "blockOnlineSalesUntil": null,
+     "serviceUrl": "https://www.cinemacity.cz/booking"
+    },
+    "bookingRouterLaunchLink": "https://www.cinemacity.cz/cz/booking-router/launch/1052/264461?lang=en",
+    "presentationCode": "264461",
+    "soldOut": false,
+    "availabilityRatio": 1.0,
+    "auditorium": "Sál 07",
+    "auditoriumTinyName": "7"
+   },
+   {
+    "id": "266597",
+    "filmId": "8333s2r",
+    "cinemaId": "1056",
+    "businessDay": "2026-10-21",
+    "eventDateTime": "2026-10-21T14:50:00",
+    "attributeIds": [
+     "15-plus",
+     "2d",
+     "4dx",
+     "adventure",
+     "first-subbed-lang-cs",
+     "laser-barco",
+     "subbed",
+     "thriller"
+    ],
+    "languages": {
+     "original": [
+      "en"
+     ],
+     "dubbed": [],
+     "voiceover": [],
+     "subtitles": [
+      "cs"
+     ]
+    },
+    "bookingLink": "https://tickets.cinemacity.cz/api/order/266597?lang=en",
+    "compositeBookingLink": {
+     "type": "PG",
+     "bookingUrl": {
+      "url": "https://tickets.cinemacity.cz/api/order/266597",
+      "params": {
+       "lang": "en-GB"
+      }
+     },
+     "obsoleteBookingUrl": "https://tickets.cinemacity.cz/api/order/266597?lang=en",
+     "blockOnlineSales": false,
+     "blockOnlineSalesUntil": null,
+     "serviceUrl": "https://www.cinemacity.cz/booking"
+    },
+    "bookingRouterLaunchLink": "https://www.cinemacity.cz/cz/booking-router/launch/1056/266597?lang=en",
+    "presentationCode": "266597",
+    "soldOut": false,
+    "availabilityRatio": 0.9718,
+    "auditorium": "Sál 04",
+    "auditoriumTinyName": "4"
+   },
+   {
+    "id": "266647",
+    "filmId": "8182s2r",
+    "cinemaId": "1056",
+    "businessDay": "2026-10-21",
+    "eventDateTime": "2026-10-21T17:00:00",
+    "attributeIds": [
+     "12-plus",
+     "2d",
+     "action",
+     "comedy",
+     "first-subbed-lang-cs",
+     "laser-barco",
+     "subbed",
+     "vip"
+    ],
+    "languages": {
+     "original": [
+      "en"
+     ],
+     "dubbed": [],
+     "voiceover": [],
+     "subtitles": [
+      "cs"
+     ]
+    },
+    "bookingLink": "https://tickets.cinemacity.cz/api/order/266647?lang=en",
+    "compositeBookingLink": {
+     "type": "PG",
+     "bookingUrl": {
+      "url": "https://tickets.cinemacity.cz/api/order/266647",
+      "params": {
+       "lang": "en-GB"
+      }
+     },
+     "obsoleteBookingUrl": "https://tickets.cinemacity.cz/api/order/266647?lang=en",
+     "blockOnlineSales": false,
+     "blockOnlineSalesUntil": null,
+     "serviceUrl": "https://www.cinemacity.cz/booking"
+    },
+    "bookingRouterLaunchLink": "https://www.cinemacity.cz/cz/booking-router/launch/1056/266647?lang=en",
+    "presentationCode": "266647",
+    "soldOut": false,
+    "availabilityRatio": 0.9767,
+    "auditorium": "Sál 16 VIP",
+    "auditoriumTinyName": "16"
+   },
+   {
+    "id": "260143",
+    "filmId": "5021o2sx4",
+    "cinemaId": "1056",
+    "businessDay": "2026-10-25",
+    "eventDateTime": "2026-10-25T13:00:00",
+    "attributeIds": [
+     "12-plus",
+     "3d",
+     "concert-film",
+     "first-subbed-lang-en",
+     "laser-barco",
+     "subbed"
+    ],
+    "languages": {
+     "original": [
+      "ko"
+     ],
+     "dubbed": [],
+     "voiceover": [],
+     "subtitles": [
+      "en"
+     ]
+    },
+    "bookingLink": "https://tickets.cinemacity.cz/api/order/260143?lang=en",
+    "compositeBookingLink": {
+     "type": "PG",
+     "bookingUrl": {
+      "url": "https://tickets.cinemacity.cz/api/order/260143",
+      "params": {
+       "lang": "en-GB"
+      }
+     },
+     "obsoleteBookingUrl": "https://tickets.cinemacity.cz/api/order/260143?lang=en",
+     "blockOnlineSales": false,
+     "blockOnlineSalesUntil": null,
+     "serviceUrl": "https://www.cinemacity.cz/booking"
+    },
+    "bookingRouterLaunchLink": "https://www.cinemacity.cz/cz/booking-router/launch/1056/260143?lang=en",
+    "presentationCode": "260143",
+    "soldOut": false,
+    "availabilityRatio": 0.7127,
+    "auditorium": "Sál 09",
+    "auditoriumTinyName": "9"
+   }
+  ]
+ }
+}
