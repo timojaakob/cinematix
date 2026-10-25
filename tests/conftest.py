@@ -28,6 +28,7 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.setattr(storage, "RESULTS_FILE", tmp_path / "results.json")
     monkeypatch.setattr(storage, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(storage, "SEATPLANS_FILE", tmp_path / "seatplans.json")
     monkeypatch.setattr(storage, "SECRET_FILE", tmp_path / "secret_key")
     for var in ("CINEMA_ID", "TMDB_API_KEY", "NTFY_TOPIC", "NTFY_URL", "WEBUI_URL"):
         monkeypatch.delenv(var, raising=False)

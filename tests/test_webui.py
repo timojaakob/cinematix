@@ -180,3 +180,92 @@ def test_movie_matches_api(client):
     assert data == {"updated_at": "2026-10-21T13:00:00", "matches": [{"event_id": "1", "movie_id": "m"}]}
     assert client.get("/api/movies/nope/matches").status_code == 404
     assert webui.app.test_client().get("/api/movies/m/matches").status_code == 401
+
+
+def add_dune(seat_alerts="all"):
+    cfg = storage.load_config()
+    cfg["movies"] = [{"id": "m", "title": "Dune", "query": "dune", "check_interval_seconds": 120,
+                      "required_formats": ["IMAX"], "seat_alerts": seat_alerts}]
+    storage.save_config(cfg)
+
+
+def test_movie_seat_settings(client):
+    finish_setup(client)
+    add_dune()
+    form = {"check_interval": "120", "query": "dune", "required_formats": ["IMAX"]}
+    rules = '[{"days": [1, 2, 9], "from": "17:00", "to": "25:00", "date_from": "soon"}, {"days": []}, "x"]'
+    client.post("/movies/m/settings", headers=SAME_ORIGIN,
+                data=dict(form, seats_wanted="4", seat_alerts="custom", watch_rules=rules))
+    movie = storage.load_config()["movies"][0]
+    assert (movie["seats_wanted"], movie["seat_alerts"]) == (4, "custom")
+    assert movie["watch_rules"] == [{"days": [1, 2], "from": "17:00", "to": "23:59", "date_from": "", "date_to": ""}]
+    client.post("/movies/m/settings", headers=SAME_ORIGIN, data=dict(form, seats_wanted="99", seat_alerts="bogus"))
+    movie = storage.load_config()["movies"][0]
+    assert (movie["seats_wanted"], movie["seat_alerts"]) == (4, "custom")
+    assert len(movie["watch_rules"]) == 1  # not sent: kept
+
+
+def test_watch_list_is_sanitized(client):
+    finish_setup(client)
+    add_dune("custom")
+    resp = client.post("/movies/m/watch", headers=SAME_ORIGIN, json={
+        "watched_dates": ["2026-12-19", "2026-12-18", "2026-12-19", "soon"],
+        "watched_event_ids": ["267914", "../x", 5, "267914"],
+        "unwatched_event_ids": ["267915"],
+    })
+    assert resp.get_json() == {
+        "watched_dates": ["2026-12-18", "2026-12-19"], "watched_event_ids": ["267914"],
+        "unwatched_event_ids": ["267915"],
+    }
+    movie = storage.load_config()["movies"][0]
+    assert movie["watched_dates"] == ["2026-12-18", "2026-12-19"]
+    assert client.post("/movies/nope/watch", headers=SAME_ORIGIN, json={}).status_code == 404
+
+
+def test_seat_map(client, monkeypatch):
+    finish_setup(client)
+    add_dune()
+    plan = {"1_1_1": ["1", "2"], "1_2_1": ["1", "1"], "1_1_2": ["2", "2"], "1_2_2": ["2", "V1"]}
+    storage.save_results([{"event_id": "7", "movie_id": "m", "venue_id": 80, "seatplan_id": 1,
+                           "venue_type_id": 1, "is_reserved": True, "freed_seats": 1}])
+    storage.save_seatplans({"80/1": {"seats": plan, "fetched_at": "2026-10-25T20:00:00"}})
+    storage.save_state({"notified_event_ids": [], "seats": {"7": {
+        "free": ["1_1_1"], "baseline": [], "checked_at": "2026-10-25T20:00:00",
+        "freed": {"1_1_1": webui.cinemacity.now().isoformat(timespec="seconds")},
+    }}})
+    monkeypatch.setattr(webui.cinemacity, "fetch_seatplan", lambda *a: pytest.fail("plan is cached"))
+    monkeypatch.setattr(webui.cinemacity, "fetch_free_seats", lambda eid, vt, r: ["1_1_1", "1_2_2"])
+    data = client.get("/api/movies/m/showtimes/7/seats").get_json()
+    # 1_2_2 is a wheelchair space: shown, never counted.
+    assert (data["free"], data["capacity"], data["freed"], data["min_x"], data["max_x"]) == (1, 3, 1, 1, 2)
+    assert [s["state"] for row in data["rows"] for s in row["seats"]] == ["freed", "taken", "taken", "free"]
+    assert data["rows"][1]["seats"][1]["wheelchair"] is True
+    assert data["hall"] == "80/1" and data["areas"]["preferred"]  # Flora IMAX default
+
+    def down(*a):
+        raise webui.FetchError("network", "down")
+
+    monkeypatch.setattr(webui.cinemacity, "fetch_free_seats", down)
+    data = client.get("/api/movies/m/showtimes/7/seats").get_json()
+    assert data["free"] == 1 and data["checked_at"] == "2026-10-25T20:00:00"  # the scraper's last fetch
+    assert client.get("/api/movies/m/showtimes/8/seats").status_code == 404
+
+
+def test_seat_areas_are_saved_per_hall(client):
+    finish_setup(client)
+    resp = client.post("/settings/seat-areas", headers=SAME_ORIGIN, json={
+        "hall": "80/1", "preferred": {"rows": [8, 5], "cols": [15, 27]}, "acceptable": {"rows": "x"},
+    })
+    assert resp.get_json()["areas"] == {"preferred": {"rows": [5, 8], "cols": [15, 27]}}
+    assert storage.seat_areas(storage.load_config()["settings"], "80/1") == {"preferred": {"rows": [5, 8], "cols": [15, 27]}}
+    assert client.post("/settings/seat-areas", headers=SAME_ORIGIN, json={"hall": "../x"}).status_code == 400
+
+
+def test_pages_show_freed_seats(client):
+    finish_setup(client)
+    add_dune("custom")
+    storage.save_results([{"event_id": "7", "movie_id": "m", "availability": 0.5, "sold_out": False,
+                           "start_time": "2026-12-19T17:20:00", "freed_seats": 3}])
+    assert "+3 seats freed" in client.get("/").get_data(as_text=True)
+    page = client.get("/movies/m").get_data(as_text=True)
+    assert "showtimes from 0 rules and the bells" in page

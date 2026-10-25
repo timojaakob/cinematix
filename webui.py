@@ -10,10 +10,12 @@ change settings through a logged-in browser.
 """
 
 import io
+import json
 import os
+import re
 import secrets
 import string
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
 
 import requests
@@ -24,7 +26,9 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import cinemacity
+import seats
 import storage
+from cinemacity import FetchError
 from version import __version__
 
 TMDB_BASE = "https://api.themoviedb.org/3"
@@ -195,6 +199,79 @@ def sanitize_required_formats(values: list[str]) -> list[str]:
     return [f for f in storage.FORMAT_OPTIONS if f in values]
 
 
+def sanitize_seats_wanted(raw: str, fallback: int) -> int:
+    try:
+        n = int(raw)
+    except ValueError:
+        return fallback
+    return n if 1 <= n <= seats.MAX_PARTY_SIZE else fallback
+
+
+EVENT_ID_RE = re.compile(r"^[0-9A-Za-z-]{1,32}$")
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+MAX_WATCHED = 500
+
+
+def _iso_date(value) -> str | None:
+    try:
+        return date.fromisoformat(value).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def sanitize_watched(body: dict) -> dict[str, list[str]]:
+    """The bells' picks: valid ISO dates and event ids, without duplicates."""
+    dates = body.get("watched_dates")
+    clean_dates = sorted({d for d in map(_iso_date, dates if isinstance(dates, list) else []) if d})
+    picks = {"watched_dates": clean_dates[:MAX_WATCHED]}
+    for key in ("watched_event_ids", "unwatched_event_ids"):
+        ids = body.get(key)
+        clean: list[str] = []
+        for e in ids if isinstance(ids, list) else []:
+            if isinstance(e, str) and EVENT_ID_RE.match(e) and e not in clean:
+                clean.append(e)
+        picks[key] = clean[:MAX_WATCHED]
+    return picks
+
+
+def sanitize_watch_rules(raw: str) -> list[dict]:
+    """The movie settings' watch rules, sent as JSON. Invalid fields fall
+    back to "any"; a rule without days is dropped."""
+    try:
+        rules = json.loads(raw or "[]")
+    except ValueError:
+        return []
+    clean = []
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, dict):
+            continue
+        days = sorted({d for d in rule.get("days", []) if isinstance(d, int) and 1 <= d <= 7})
+        if not days:
+            continue
+        start = rule.get("from") if TIME_RE.fullmatch(str(rule.get("from", ""))) else "00:00"
+        end = rule.get("to") if TIME_RE.fullmatch(str(rule.get("to", ""))) else "23:59"
+        clean.append({
+            "days": days, "from": start, "to": end,
+            "date_from": _iso_date(rule.get("date_from")) or "",
+            "date_to": _iso_date(rule.get("date_to")) or "",
+        })
+    return clean[:storage.MAX_WATCH_RULES]
+
+
+def sanitize_area(value) -> dict | None:
+    """{"rows": [y1, y2], "cols": [x1, x2]} with small positive ints, or None."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        rows = sorted(int(v) for v in value["rows"])
+        cols = sorted(int(v) for v in value["cols"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if len(rows) != 2 or len(cols) != 2 or not all(0 < v < 1000 for v in rows + cols):
+        return None
+    return {"rows": rows, "cols": cols}
+
+
 def sanitize_interval(raw: str, fallback: int | None) -> int | None:
     """"off" -> None; any value not in CHECK_INTERVAL_OPTIONS -> fallback."""
     if raw == "off":
@@ -287,6 +364,14 @@ def tmdb_get(path: str, key: str, params: dict | None = None) -> dict:
 
 def get_tmdb_api_key() -> str:
     return storage.load_config()["settings"].get("tmdb_api_key", "")
+
+
+def seat_ratio(match: dict) -> float:
+    """Share of free seats: in the seating areas when the scraper has the
+    seats, else the feed's availability for the whole hall."""
+    if match.get("seat_ratio") is not None:
+        return match["seat_ratio"]
+    return match.get("availability") or 0.0
 
 
 def card_status_tier(showtime_count: int, best_availability: float | None) -> str:
@@ -502,7 +587,11 @@ def index():
             and not m.get("sold_out") and m.get("availability") is not None and m["availability"] >= 0.005
         ]
         next_sale_start = min((m["sale_start"] for m in upcoming), default=None)
-        best_availability = max((m["availability"] for m in open_matches), default=None)
+        freed_seats = sum(m.get("freed_seats") or 0 for m in open_matches)
+        # Free seats in the seating areas where the seats are known, else
+        # the feed's share of the whole hall.
+        best = max(open_matches, key=seat_ratio, default=None)
+        best_availability = seat_ratio(best) if best else None
         showtime_count = len(movie_matches)
         movies.append(
             {
@@ -513,7 +602,10 @@ def index():
                 "upcoming_count": len(upcoming),
                 "next_sale_start": datetime.fromisoformat(next_sale_start) if next_sale_start else None,
                 "new_count": sum(1 for m in open_matches if is_new_showtime(m, now)),
+                "freed_seats": freed_seats,
                 "best_availability": best_availability,
+                "best_free_seats": best.get("free_seats") if best else None,
+                "best_in_areas": bool(best and best.get("in_areas")),
                 "status_tier": card_status_tier(showtime_count, best_availability),
             }
         )
@@ -594,6 +686,7 @@ def movie_detail(movie_id):
         # different check intervals.
         updated_at=storage.last_checked_at(movie, storage.load_state()),
         check_interval_options=CHECK_INTERVAL_OPTIONS,
+        max_party_size=seats.MAX_PARTY_SIZE,
         settings=page_settings(config),
         cinemas=cinema_list(),
         ntfy_priority_options=storage.NTFY_PRIORITY_OPTIONS,
@@ -640,12 +733,119 @@ def update_settings(movie_id):
         or new_query != movie.get("query", "")
     )
 
-    storage.update_movie_settings(config, movie_id, new_query, check_interval_seconds, required_formats)
+    seats_wanted = sanitize_seats_wanted(request.form.get("seats_wanted", ""), storage.seats_wanted(movie))
+    seat_alerts = request.form.get("seat_alerts", "")
+    if seat_alerts not in storage.SEAT_ALERT_OPTIONS:
+        seat_alerts = movie.get("seat_alerts", "all")
+    if "watch_rules" in request.form:
+        watch_rules = sanitize_watch_rules(request.form["watch_rules"])
+    else:
+        watch_rules = movie.get("watch_rules", [])
+
+    storage.update_movie_settings(
+        config, movie_id, new_query, check_interval_seconds, required_formats, seats_wanted, seat_alerts,
+        watch_rules,
+    )
     # A shorter interval or changed matching is worth an immediate recheck;
     # a longer interval alone isn't, and neither is turning checking off.
     if check_interval_seconds is not None and (frequency_increased or results_now_stale):
         trigger_check(movie_id)
     return redirect(url_for("movie_detail", movie_id=movie_id))
+
+
+@app.route("/movies/<movie_id>/watch", methods=["POST"])
+def update_watched(movie_id):
+    """Saves the bells on the movie page: picked dates and showtimes, and
+    showtimes turned off although a watch rule covers them. The page sends
+    the complete lists."""
+    config = storage.load_config()
+    if not any(m["id"] == movie_id for m in config["movies"]):
+        abort(404)
+    picks = sanitize_watched(request.get_json(silent=True) or {})
+    storage.set_watched(config, movie_id, picks)
+    return jsonify(picks)
+
+
+@app.route("/api/movies/<movie_id>/showtimes/<event_id>/seats", methods=["GET"])
+def api_seat_map(movie_id, event_id):
+    """The hall of one showtime with every seat's state, for the seat map.
+    Free seats are fetched live from the booking site; if that fails, the
+    scraper's last fetch is used. "fits" marks the seats where a group of
+    the movie's seats_wanted fits."""
+    config = storage.load_config()
+    movie = next((m for m in config["movies"] if m["id"] == movie_id), None)
+    match = next((m for m in movie_matches(movie_id) if m["event_id"] == event_id), None)
+    if movie is None or match is None:
+        abort(404)
+    if match.get("venue_id") is None or not match.get("is_reserved"):
+        return jsonify({"error": "There is no seat map for this showtime."}), 404
+
+    plan_key = storage.seatplan_key(match["venue_id"], match["seatplan_id"])
+    plan = (storage.load_seatplans().get(plan_key) or {}).get("seats")
+    try:
+        if not plan:
+            plan = cinemacity.fetch_seatplan(match["venue_id"], match["seatplan_id"])
+        free = cinemacity.fetch_free_seats(event_id, match.get("venue_type_id"), match["is_reserved"])
+        checked_at = cinemacity.now().isoformat(timespec="seconds")
+    except FetchError as e:
+        app.logger.warning("Seat map for %s unavailable: %s", event_id, e)
+        rec = storage.load_state().get("seats", {}).get(event_id)
+        if not plan or not rec:
+            return jsonify({"error": "Cinema City didn't answer. Try again in a minute."}), 502
+        free, checked_at = rec["free"], rec["checked_at"]
+
+    free_set = set(free) & set(plan)
+    usable_free = seats.usable(free_set, plan)
+    areas = storage.seat_areas(config["settings"], plan_key)
+    rec = storage.load_state().get("seats", {}).get(event_id) or {}
+    window_start = (cinemacity.now() - timedelta(seconds=storage.FREED_SEATS_WINDOW_SECONDS)).isoformat()
+    freed = {k for k, at in rec.get("freed", {}).items() if k in usable_free and at > window_start}
+    wanted = storage.seats_wanted(movie)
+    groups = seats.find_groups(seats.in_areas(usable_free, areas), wanted) if wanted > 1 else []
+    fits = set().union(*groups) if groups else set()
+    # Wheelchair spaces are shown but never counted.
+    free_by_area = {a: sum(1 for k in usable_free if seats.area_of(k, areas) == a) for a in seats.AREAS}
+
+    rows: dict[tuple[str, int], dict] = {}
+    for key, (row_name, seat_name) in plan.items():
+        section, x, y = seats.parse_key(key)
+        row = rows.setdefault((section, y), {"name": row_name, "y": y, "seats": []})
+        row["seats"].append({
+            "x": x, "name": seat_name,
+            "state": "freed" if key in freed else "free" if key in free_set else "taken",
+            "wheelchair": seats.is_wheelchair(seat_name),
+            "fits": key in fits,
+            "area": seats.area_of(key, areas),
+        })
+    for row in rows.values():
+        row["seats"].sort(key=lambda seat: seat["x"])
+    xs = [seats.parse_key(k)[1] for k in plan]
+    return jsonify({
+        "hall": plan_key,
+        "areas": areas,
+        "rows": [rows[k] for k in sorted(rows)],
+        "min_x": min(xs), "max_x": max(xs),
+        "capacity": len(seats.usable(plan, plan)),
+        "free": len(usable_free),
+        "free_by_area": free_by_area if any(areas.values()) else None,
+        "freed": len(freed),
+        "seats_wanted": wanted,
+        "fits": bool(groups),
+        "checked_at": checked_at,
+    })
+
+
+@app.route("/settings/seat-areas", methods=["POST"])
+def update_seat_areas():
+    """Saves a hall's seating areas from the seat map. Both empty means no
+    areas, so every seat is acceptable."""
+    body = request.get_json(silent=True) or {}
+    hall = str(body.get("hall", ""))
+    if not re.fullmatch(r"\d{1,9}/\d{1,9}", hall):
+        return jsonify({"error": "Unknown hall."}), 400
+    areas = {a: area for a in seats.AREAS if (area := sanitize_area(body.get(a)))}
+    storage.set_seat_areas(storage.load_config(), hall, areas)
+    return jsonify({"hall": hall, "areas": areas})
 
 
 @app.route("/settings", methods=["POST"])

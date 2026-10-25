@@ -3,7 +3,7 @@
 cinematix watches a Cinema City cinema in the Czech Republic for the movies you choose. It sends a push notification to your phone when:
 
 - a new showtime is listed, with the time booking opens if it hasn't opened yet,
-- seats free up in a showtime, for example after a sold-out drop when unpaid baskets expire.
+- seats free up in a showtime, for example after a sold-out drop when unpaid baskets expire. The push says how many seats came back and where a group of your size can sit.
 
 It was built for IMAX tickets at Prague Flora, the only IMAX hall in Czechia, where big releases sell out within minutes. It works with every Cinema City cinema in Czechia.
 
@@ -70,6 +70,33 @@ The wizard opens on the first visit and has four steps. Everything can be change
 
 Then search for a movie, choose the formats you want (IMAX, 4DX, Superscreen, VIP, 3D, 2D), and cinematix starts checking.
 
+## Freed seats
+
+Each showtime shows its free seats inside your seating areas, for example "13 of 144 in your area" (in a hall without areas: "59 of 379 free"). The seat strip, its colour, the filters, the sorting and the movie cards use the same count. Wheelchair spaces are shown in blue on the seat map and never counted. Tap the count to open the seat map. It shows which seats are free, which were freed in the last 24 hours, where your group fits, and your seating areas. Showtimes and movie cards with freed seats get a "+3 freed" badge.
+
+### Seating areas
+
+Each hall can have a **preferred** area and an **acceptable** area, drawn as green and yellow boxes on the seat map. Seats outside both areas never count. A hall without areas allows every seat. Flora's IMAX hall comes with areas preset, centred on the screen: preferred is rows 5–8, 12 seats wide, and acceptable is rows 4–12, 16 seats wide.
+
+To change the areas of a hall:
+
+1. Open the seat map of any showtime in that hall.
+2. Tap **Edit seating areas**.
+3. Tap two opposite corner seats of the preferred area. Tap **Skip** to leave it out.
+4. Tap two opposite corner seats of the acceptable area, or tap **Skip**.
+5. Tap **Save areas**.
+
+**No areas** removes both areas, so every seat counts.
+
+### When a push is sent
+
+Two settings in a movie's settings control the "seats freed up" push:
+
+- **Seats together.** The free seats in your areas must hold a group of this size, and at least one seat of that group must have been freed since the last push. Seats that were free before can complete the group. Two or three seats must be next to each other in one row. Four or more can also be two blocks in neighbouring rows, with the smaller block directly behind or in front of part of the larger one: 4 is 2 + 2, 5 is 3 + 2, 6 is 4 + 2 or 3 + 3. Wheelchair spaces never count. "Any seat" sends a push for every freed seat in your areas.
+- **Freed seats for.** "All showtimes", or "Custom". Custom watches showtimes that match any of the movie's rules, plus the dates and showtimes you turn on with the bells on the movie page. A rule has days of the week, a start-time window and an optional date range. "Weekday evenings" (Monday to Friday from 17:00) and "Weekends" are presets. A bell can also turn off one showtime that a rule covers, and a date's bell also covers showtimes added to that date later.
+
+The push names the group and its area, for example "+2 seats in your areas, 9 free now. 2 together in the preferred area: row 6, seats 20-21". Groups in the preferred area are reported first. When booking opens, or a sold-out showtime reopens, every free seat counts as freed.
+
 ## Install on your phone
 
 cinematix is a web app that can be added to the home screen, where it opens like an app. Browsers allow this only over HTTPS. Over plain `http://` on your home network it still works in the browser, but it cannot be installed.
@@ -93,7 +120,7 @@ Everything you choose is set in the web UI and stored in `/data/config.json`. Th
 | Variable | Default | Description |
 |---|---|---|
 | `PUID`, `PGID` | `1000` | User and group the app runs as. Set them to your user's IDs if `/data` is a bind mount, so the files belong to you. |
-| `AVAILABILITY_RISE_THRESHOLD` | `0` | A "seats freed up" push is sent when free seats rise by more than this share of the hall. `0` means any returned seat, `0.01` means 1 %. |
+| `AVAILABILITY_RISE_THRESHOLD` | `0` | Only for halls without a seat map: a "seats freed up" push is sent when free seats rise by more than this share of the hall. `0` means any returned seat, `0.01` means 1 %. |
 | `OUTAGE_ALERT_AFTER_SECONDS` | `300` | How long Cinema City can be unreachable before you get an alert. |
 | `DEBUG` | `false` | Verbose logs, including raw API responses. |
 
@@ -110,7 +137,9 @@ Cinema City has no public API. cinematix uses the internal JSON endpoints behind
 | `GET www.cinemacity.cz/cz/data-api-service/v1/quickbook/10101/cinemas/with-event/until/{date}` | The cinema list in the setup wizard and settings |
 | `GET …/quickbook/10101/dates/in-cinema/{cinemaId}/until/{date}` | Dates that have screenings |
 | `GET …/quickbook/10101/film-events/in-cinema/{cinemaId}/at-date/{date}` | One day's films (`body.films[]`) and showtimes (`body.events[]`, joined on `filmId`) |
-| `GET tickets.cinemacity.cz/api/presentations/{eventId}` | When booking opens and closes |
+| `GET tickets.cinemacity.cz/api/presentations/{eventId}` | When booking opens and closes, and the hall's ids |
+| `GET tickets.cinemacity.cz/api/seats/seatplan?venueId=…&seatplanId=…` | The hall layout: every seat with its row, number and grid position |
+| `GET tickets.cinemacity.cz/api/seats/seats-statusV2?presentationId=…&venueTypeId=…&isReserved=…` | Which seats are free right now |
 
 Findings built into the code:
 
@@ -120,6 +149,7 @@ Findings built into the code:
 - **Booking links.** The feed's `bookingLink` points at `tickets.cinemacity.cz/api/order/{id}`, which returns 404. The working link drops `/api/`.
 - **Unpublished dates** return HTTP 200 with empty arrays, not an error.
 - **Booking open time.** Showtimes are often listed days before booking opens, and the feed doesn't say when. The booking site's presentation endpoint does. While a showtime is locked it returns `{"error": {"error": "TICKETING_NOT_STARTED", "data": "2026-10-20 09:00"}}`. Once open, it returns `presentation.ticketSaleStart`. It answers HTTP 200 even for errors and needs no login or reCAPTCHA. cinematix fetches it once per matched showtime and rechecks upcoming times hourly until booking opens.
+- **Seats.** The seat plan puts every seat on a grid: seats next to each other differ by 1 in `x`, an aisle is a missing `x`, and the row behind has `y + 1` (row 1 is at the screen). Halls are drawn on this grid, so the same `x` in the next row is directly behind. Seat names starting with `V` are wheelchair spaces. The seat status endpoint lists only the free seats, as `{"seats": {"1_8_1": 0, …}}` with the same `section_x_y` keys. It answers HTTP 403 without a `uuid` header; any random UUID works, with no cookie, login or reCAPTCHA. cinematix fetches it for showtimes whose `availabilityRatio` changed, at most 40 per check, and caches hall layouts in `seatplans.json`.
 - **Time zone.** All times from the APIs are Prague local time without an offset. cinematix compares them with Prague time itself, so the container's time zone doesn't matter.
 
 Files in `/data`:
@@ -127,7 +157,8 @@ Files in `/data`:
 | File | Content | Written by |
 |---|---|---|
 | `config.json` | Movies and settings | Web UI |
-| `state.json` | Notification history, seat baselines, booking open times, last check per movie | Scraper |
+| `state.json` | Notification history, free seats and seat baselines, booking open times, last check per movie | Scraper |
+| `seatplans.json` | Hall layouts | Scraper |
 | `results.json` | Current matching showtimes | Scraper |
 | `secret_key` | Signs the login session | Created once |
 

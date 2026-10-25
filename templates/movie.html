@@ -37,6 +37,9 @@
             {% else %}
               Watching for {{ (movie.required_formats or ['no formats']) | join(', ') }}, {{ interval_labels.get(movie.check_interval_seconds, 'every ' ~ movie.check_interval_seconds ~ ' s') | lower }}.
             {% endif %}
+            {% set wanted = movie.seats_wanted or 1 %}
+            Freed seats: {{ 'any seat' if wanted == 1 else wanted ~ ' together' }},
+            {% if movie.seat_alerts == 'custom' %}{% set n_rules = (movie.watch_rules or []) | length %}showtimes from {{ n_rules }} rule{{ 's' if n_rules != 1 else '' }} and the bells{% else %}all showtimes{% endif %}.
           </p>
         </div>
       </div>
@@ -194,6 +197,34 @@
           </div>
           <p class="hint">Only showtimes in the selected formats are tracked.</p>
         </div>
+        <div class="field field-row">
+          <label class="field-label" for="seats_wanted">Seats together</label>
+          <select id="seats_wanted" name="seats_wanted" aria-describedby="seats-wanted-hint">
+            {% for n in range(1, max_party_size + 1) %}
+            <option value="{{ n }}" {% if (movie.seats_wanted or 1) == n %}selected{% endif %}>{{ 'Any seat' if n == 1 else n }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <p class="hint" id="seats-wanted-hint">A "seats freed up" push needs this many free seats together in your seating areas, with at least one of them just freed. Two or three must be in one row. Four or more can also be two rows, one directly behind the other.</p>
+        <div class="field">
+          <span class="field-label">Freed seats for</span>
+          <div class="chips">
+            <label class="chip"><input type="radio" name="seat_alerts" value="all" {% if movie.seat_alerts != 'custom' %}checked{% endif %}> All showtimes</label>
+            <label class="chip"><input type="radio" name="seat_alerts" value="custom" {% if movie.seat_alerts == 'custom' %}checked{% endif %}> Custom</label>
+          </div>
+          <div id="watch-rules-section" class="watch-rules"{% if movie.seat_alerts != 'custom' %} hidden{% endif %}>
+            <p class="hint">Showtimes that match any rule, plus the dates and showtimes you turn on with the bells. A bell can also turn off one showtime that a rule covers.</p>
+            <div id="watch-rules"></div>
+            <div class="watch-rules-add">
+              <span class="hint">Add</span>
+              <button type="button" class="chip-btn" data-preset="evenings">Weekday evenings</button>
+              <button type="button" class="chip-btn" data-preset="weekends">Weekends</button>
+              <button type="button" class="chip-btn" data-preset="range">Date range</button>
+              <button type="button" class="chip-btn" data-preset="custom">Custom rule</button>
+            </div>
+            <input type="hidden" name="watch_rules" id="watch-rules-input" value="{{ (movie.watch_rules or []) | tojson | forceescape }}">
+          </div>
+        </div>
         <details class="advanced field">
           <summary>Match text</summary>
           <input type="text" id="query" name="query" value="{{ movie.query }}" aria-describedby="query-hint" autocapitalize="off" spellcheck="false">
@@ -205,6 +236,37 @@
         <button type="button" id="remove-movie-cancel-btn" class="link-btn" hidden>Cancel</button>
         <form id="remove-movie-form" method="post" action="{{ url_for('remove_movie', movie_id=movie.id) }}" hidden></form>
         <button id="settings-apply-btn" type="submit" form="settings-form" class="btn" disabled>Save changes</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="seatmap-overlay" class="modal-overlay">
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="seatmap-title">
+      <div class="modal-header">
+        <h2 id="seatmap-title">Seats</h2>
+        <button id="seatmap-close-btn" type="button" class="icon-btn" aria-label="Close seat map">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="seatmap-stats" class="seatmap-stats" hidden></div>
+      <p id="seatmap-summary" class="seatmap-summary" aria-live="polite"></p>
+      <p id="seatmap-edit-hint" class="seatmap-edit-hint" aria-live="polite" hidden></p>
+      <div id="seatmap" class="seatmap"></div>
+      <div class="seatmap-legend" aria-hidden="true">
+        <span><i class="free"></i>Free</span>
+        <span><i class="freed"></i>Freed in the last 24 h</span>
+        <span id="seatmap-legend-fits"><i class="free fits"></i>Fits your group</span>
+        <span><i class="taken"></i>Taken</span>
+        <span><i class="free wheelchair"></i>Wheelchair space</span>
+        <span id="seatmap-legend-areas"><b class="area-key preferred"></b>Preferred <b class="area-key acceptable"></b>Acceptable</span>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="seatmap-edit-btn" class="link-btn" hidden>Edit seating areas</button>
+        <button type="button" id="seatmap-skip-btn" class="link-btn" hidden>Skip</button>
+        <button type="button" id="seatmap-clear-btn" class="link-btn" hidden>No areas</button>
+        <button type="button" id="seatmap-cancel-btn" class="link-btn" hidden>Cancel</button>
+        <button type="button" id="seatmap-save-btn" class="btn" hidden>Save areas</button>
+        <a id="seatmap-book" class="btn" target="_blank" rel="noopener" hidden>Book</a>
       </div>
     </div>
   </div>
@@ -233,7 +295,8 @@ const settingsApplyBtn = document.getElementById('settings-apply-btn');
 const settingsFields = Array.from(settingsForm.elements).filter(el => el.name);
 // Keyed by element, not name: several checkboxes share name="required_formats",
 // so a name-keyed map would only remember the last one's initial state.
-const settingsInitial = new Map(settingsFields.map(el => [el, el.type === 'checkbox' ? el.checked : el.value]));
+const isToggle = el => el.type === 'checkbox' || el.type === 'radio';
+const settingsInitial = new Map(settingsFields.map(el => [el, isToggle(el) ? el.checked : el.value]));
 
 function closeSettings() {
   settingsOverlay.classList.remove('open');
@@ -242,7 +305,7 @@ function closeSettings() {
 
 function updateApplyState() {
   settingsApplyBtn.disabled = !settingsFields.some(el => {
-    const current = el.type === 'checkbox' ? el.checked : el.value;
+    const current = isToggle(el) ? el.checked : el.value;
     return current !== settingsInitial.get(el);
   });
 }
@@ -379,6 +442,381 @@ pollForBackgroundCheck();
 setInterval(pollForBackgroundCheck, 10000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) pollForBackgroundCheck(); });
 
+// --- Watch rules in the settings sheet. The rules are kept in a hidden
+// input as JSON, so the normal "Save changes" flow submits them. ---
+{
+  const section = document.getElementById('watch-rules-section');
+  const list = document.getElementById('watch-rules');
+  const input = document.getElementById('watch-rules-input');
+  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const PRESETS = {
+    evenings: () => ({ days: [1, 2, 3, 4, 5], from: '17:00', to: '23:59', date_from: '', date_to: '' }),
+    weekends: () => ({ days: [6, 7], from: '00:00', to: '23:59', date_from: '', date_to: '' }),
+    range: () => {
+      const today = new Date().toISOString().slice(0, 10);
+      return { days: [1, 2, 3, 4, 5, 6, 7], from: '00:00', to: '23:59', date_from: today, date_to: '' };
+    },
+    custom: () => ({ days: [1, 2, 3, 4, 5, 6, 7], from: '00:00', to: '23:59', date_from: '', date_to: '' }),
+  };
+  let rules = JSON.parse(input.value || '[]');
+
+  function save() {
+    input.value = JSON.stringify(rules);
+    updateApplyState();
+  }
+
+  function field(type, value, label, onChange) {
+    const el = document.createElement('input');
+    el.type = type;
+    el.value = value;
+    el.setAttribute('aria-label', label);
+    el.addEventListener('change', () => { onChange(el.value); save(); });
+    return el;
+  }
+
+  function render() {
+    list.replaceChildren();
+    rules.forEach((rule, i) => {
+      const box = document.createElement('div');
+      box.className = 'watch-rule';
+      const days = document.createElement('div');
+      days.className = 'rule-days';
+      DAYS.forEach((name, d) => {
+        const label = document.createElement('label');
+        label.className = 'chip';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = rule.days.includes(d + 1);
+        cb.addEventListener('change', () => {
+          rule.days = cb.checked ? [...rule.days, d + 1].sort() : rule.days.filter(x => x !== d + 1);
+          save();
+        });
+        label.append(cb, ` ${name}`);
+        days.appendChild(label);
+      });
+      const between = (label, from, to) => {
+        const line = document.createElement('div');
+        line.className = 'rule-range';
+        const name = document.createElement('span');
+        name.textContent = label;
+        const sep = document.createElement('span');
+        sep.textContent = 'to';
+        line.append(name, from, sep, to);
+        return line;
+      };
+      const times = between('Starts',
+        field('time', rule.from, 'Earliest start', v => { rule.from = v || '00:00'; }),
+        field('time', rule.to, 'Latest start', v => { rule.to = v || '23:59'; }));
+      const dates = between('Dates',
+        field('date', rule.date_from, 'First date (empty for no limit)', v => { rule.date_from = v; }),
+        field('date', rule.date_to, 'Last date (empty for no limit)', v => { rule.date_to = v; }));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'link-btn';
+      remove.textContent = 'Remove rule';
+      remove.addEventListener('click', () => { rules.splice(i, 1); render(); save(); });
+      box.append(days, times, dates, remove);
+      list.appendChild(box);
+    });
+  }
+
+  for (const b of section.querySelectorAll('[data-preset]')) {
+    b.addEventListener('click', () => { rules.push(PRESETS[b.dataset.preset]()); render(); save(); });
+  }
+  for (const radio of document.querySelectorAll('input[name="seat_alerts"]')) {
+    radio.addEventListener('change', () => { section.hidden = radio.value !== 'custom' || !radio.checked; });
+  }
+  render();
+}
+
+// --- Bells: which dates and showtimes can send a "seats freed up" push.
+// Only shown in "Custom" mode. Mirrors storage.watches_showtime(). ---
+const PICK_MODE = {{ (movie.seat_alerts == 'custom') | tojson }};
+const WATCH_RULES = {{ (movie.watch_rules or []) | tojson }};
+let picks = {
+  dates: new Set({{ (movie.watched_dates or []) | tojson }}),
+  ids: new Set({{ (movie.watched_event_ids or []) | tojson }}),
+  off: new Set({{ (movie.unwatched_event_ids or []) | tojson }}),
+};
+const watchUrl = '{{ url_for("update_watched", movie_id=movie.id) }}';
+// Replaced below with the function that redraws the showtimes.
+let redrawShowtimes = () => {};
+
+// start_time is Prague local time without an offset, like the rules.
+const showDay = m => (m.start_time || '').slice(0, 10);
+function matchesRule(rule, m) {
+  const day = showDay(m);
+  const hhmm = (m.start_time || '').slice(11, 16);
+  const weekday = new Date(`${day}T00:00:00`).getDay() || 7;
+  return rule.days.includes(weekday) && rule.from <= hhmm && hhmm <= rule.to
+    && (!rule.date_from || day >= rule.date_from) && (!rule.date_to || day <= rule.date_to);
+}
+const ruleCovers = m => WATCH_RULES.some(rule => matchesRule(rule, m));
+const watchedIn = (p, m) => !p.off.has(m.event_id)
+  && (p.dates.has(showDay(m)) || p.ids.has(m.event_id) || ruleCovers(m));
+const isWatched = m => watchedIn(picks, m);
+const copyPicks = () => ({ dates: new Set(picks.dates), ids: new Set(picks.ids), off: new Set(picks.off) });
+
+async function savePicks(next) {
+  const before = picks;
+  picks = next;
+  redrawShowtimes();
+  try {
+    const resp = await fetch(watchUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        watched_dates: [...next.dates], watched_event_ids: [...next.ids], unwatched_event_ids: [...next.off],
+      }),
+    });
+    if (!resp.ok) throw new Error(resp.status);
+  } catch (e) {
+    picks = before;
+    redrawShowtimes();
+    checkStatus.textContent = 'Could not save the bell. Try again.';
+    checkStatus.hidden = false;
+  }
+}
+
+// Turning one showtime off on a picked date keeps the date's other showtimes.
+function toggleShowtime(m) {
+  const next = copyPicks();
+  if (isWatched(m)) {
+    next.ids.delete(m.event_id);
+    if (next.dates.delete(showDay(m))) {
+      for (const other of MATCHES) if (showDay(other) === showDay(m) && other.event_id !== m.event_id) next.ids.add(other.event_id);
+    }
+    if (ruleCovers(m)) next.off.add(m.event_id);
+  } else {
+    next.off.delete(m.event_id);
+    if (!watchedIn(next, m)) next.ids.add(m.event_id);
+  }
+  savePicks(next);
+}
+
+const dayShows = day => MATCHES.filter(m => showDay(m) === day);
+const isDayWatched = day => dayShows(day).every(isWatched);
+
+function toggleDate(day) {
+  const next = copyPicks();
+  const on = isDayWatched(day);
+  for (const m of dayShows(day)) {
+    next.ids.delete(m.event_id);
+    next.off.delete(m.event_id);
+    if (on && ruleCovers(m)) next.off.add(m.event_id);
+  }
+  if (on) next.dates.delete(day); else next.dates.add(day);
+  savePicks(next);
+}
+
+const BELL_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+
+function bellButton(on, label, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'icon-btn bell' + (on ? ' on' : '');
+  b.innerHTML = BELL_ICON;
+  b.setAttribute('aria-pressed', String(on));
+  b.setAttribute('aria-label', label);
+  b.title = on ? 'Freed seats send a push' : 'Freed seats send no push';
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+// --- Seat map: one grid for the whole hall (first column holds the row
+// names), so a seating area is one box spanning its rows and columns. ---
+const seatmapOverlay = document.getElementById('seatmap-overlay');
+const seatmapEl = document.getElementById('seatmap');
+const seatmapTitle = document.getElementById('seatmap-title');
+const seatmapSummary = document.getElementById('seatmap-summary');
+const seatmapStats = document.getElementById('seatmap-stats');
+const seatmapEditHint = document.getElementById('seatmap-edit-hint');
+const seatmapBook = document.getElementById('seatmap-book');
+const seatmapLegendFits = document.getElementById('seatmap-legend-fits');
+const seatmapLegendAreas = document.getElementById('seatmap-legend-areas');
+const seatmapBtns = Object.fromEntries(['edit', 'skip', 'clear', 'cancel', 'save'].map(k => [k, document.getElementById(`seatmap-${k}-btn`)]));
+const seatsUrl = eid => '{{ url_for("api_seat_map", movie_id=movie.id, event_id="EVENT_ID") }}'.replace('EVENT_ID', encodeURIComponent(eid));
+const areasUrl = '{{ url_for("update_seat_areas") }}';
+const AREA_STEPS = ['preferred', 'acceptable'];
+let seatmapSeq = 0;
+let seatmapData = null;
+let seatmapShow = null;
+// While editing: {step: index into AREA_STEPS, corner: first tapped seat, areas}.
+let editing = null;
+
+function closeSeatmap() { seatmapOverlay.classList.remove('open'); seatmapSeq++; editing = null; }
+document.getElementById('seatmap-close-btn').addEventListener('click', closeSeatmap);
+seatmapOverlay.addEventListener('click', (e) => { if (e.target === seatmapOverlay) closeSeatmap(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && seatmapOverlay.classList.contains('open')) closeSeatmap();
+});
+
+function rowIndexRange(rows, rect) {
+  const idx = rows.map((r, i) => [r.y, i]).filter(([y]) => y >= rect.rows[0] && y <= rect.rows[1]).map(([, i]) => i);
+  return idx.length ? [idx[0], idx[idx.length - 1]] : null;
+}
+
+function drawSeatmap() {
+  const data = seatmapData;
+  const areas = editing ? editing.areas : data.areas;
+  const cols = data.max_x - data.min_x + 1;
+  seatmapEl.replaceChildren();
+  seatmapEl.style.setProperty('--cols', cols);
+  seatmapEl.classList.toggle('editing', !!editing);
+  const screen = document.createElement('div');
+  screen.className = 'seatmap-screen';
+  screen.textContent = 'Screen';
+  seatmapEl.appendChild(screen);
+  data.rows.forEach((row, i) => {
+    const name = document.createElement('span');
+    name.className = 'seatmap-row-name';
+    name.style.gridRow = String(i + 2);
+    name.textContent = row.name;
+    seatmapEl.appendChild(name);
+    for (const seat of row.seats) {
+      const el = document.createElement('i');
+      el.className = seat.state + (seat.fits ? ' fits' : '') + (seat.wheelchair ? ' wheelchair' : '')
+        + (!editing && seat.area === null ? ' outside' : '')
+        + (editing && editing.corner && editing.corner.x === seat.x && editing.corner.y === row.y ? ' corner' : '');
+      el.style.gridRow = String(i + 2);
+      el.style.gridColumn = String(seat.x - data.min_x + 2);
+      el.title = `Row ${row.name}, seat ${seat.name}: ${seat.state === 'taken' ? 'taken' : seat.state === 'freed' ? 'freed' : 'free'}`;
+      if (editing) el.addEventListener('click', () => tapSeat(seat.x, row.y));
+      seatmapEl.appendChild(el);
+    }
+  });
+  for (const area of AREA_STEPS) {
+    const rect = areas[area];
+    const span = rect && rowIndexRange(data.rows, rect);
+    if (!span) continue;
+    const box = document.createElement('div');
+    box.className = `seatmap-area ${area}`;
+    box.style.gridRow = `${span[0] + 2} / ${span[1] + 3}`;
+    box.style.gridColumn = `${Math.max(rect.cols[0], data.min_x) - data.min_x + 2} / ${Math.min(rect.cols[1], data.max_x) - data.min_x + 3}`;
+    seatmapEl.appendChild(box);
+  }
+  seatmapLegendAreas.hidden = !(areas.preferred || areas.acceptable);
+  updateSeatmapControls();
+}
+
+// Free seats as a row of counts (in the area colours when the hall has
+// areas), then one line with what changed and whether your group fits.
+function describeSeatmap() {
+  const data = seatmapData;
+  const stats = [[data.free, `free of ${data.capacity}`, '']];
+  if (data.free_by_area) {
+    stats.push([data.free_by_area.preferred, 'preferred', 'preferred'], [data.free_by_area.acceptable, 'acceptable', 'acceptable']);
+  }
+  seatmapStats.replaceChildren(...stats.map(([n, label, cls]) => {
+    const item = document.createElement('div');
+    item.className = `seatmap-stat ${cls}`;
+    const num = document.createElement('strong');
+    num.textContent = String(n);
+    const text = document.createElement('span');
+    text.textContent = label;
+    item.append(num, text);
+    return item;
+  }));
+  seatmapStats.hidden = false;
+  const parts = [];
+  if (data.freed) parts.push(`${data.freed} freed in the last 24 hours.`);
+  if (data.seats_wanted > 1) {
+    const where = data.free_by_area ? ' in your areas' : '';
+    parts.push(data.fits ? `${data.seats_wanted} together fit${where}.` : `${data.seats_wanted} together don't fit${where}.`);
+  }
+  parts.push(`As of ${formatRelative(data.checked_at)}.`);
+  seatmapSummary.textContent = parts.join(' ');
+  seatmapLegendFits.hidden = !(data.seats_wanted > 1);
+}
+
+function updateSeatmapControls() {
+  const loaded = !!seatmapData;
+  seatmapBtns.edit.hidden = !loaded || !!editing;
+  for (const k of ['skip', 'clear', 'cancel', 'save']) seatmapBtns[k].hidden = !editing;
+  seatmapBtns.skip.hidden = !editing || editing.step >= AREA_STEPS.length;
+  seatmapBtns.save.disabled = !!editing && editing.step < AREA_STEPS.length;
+  seatmapBook.hidden = !!editing || !(seatmapShow && seatmapShow.booking_link);
+  seatmapEditHint.hidden = !editing;
+  if (!editing) return;
+  if (editing.step >= AREA_STEPS.length) {
+    seatmapEditHint.textContent = 'Save the areas, or tap Cancel. They apply to every showtime in this hall.';
+  } else {
+    const area = AREA_STEPS[editing.step];
+    seatmapEditHint.textContent = editing.corner
+      ? `Tap the opposite corner seat of the ${area} area.`
+      : `Tap one corner seat of the ${area} area${area === 'acceptable' ? ' (it may include the preferred area)' : ''}, or tap Skip.`;
+  }
+}
+
+function tapSeat(x, y) {
+  if (!editing || editing.step >= AREA_STEPS.length) return;
+  if (!editing.corner) {
+    editing.corner = { x, y };
+  } else {
+    const c = editing.corner;
+    editing.areas[AREA_STEPS[editing.step]] = { rows: [Math.min(c.y, y), Math.max(c.y, y)], cols: [Math.min(c.x, x), Math.max(c.x, x)] };
+    editing.corner = null;
+    editing.step++;
+  }
+  drawSeatmap();
+}
+
+seatmapBtns.edit.addEventListener('click', () => {
+  editing = { step: 0, corner: null, areas: {} };
+  drawSeatmap();
+  // Seats get bigger to tap; start with the middle of the hall in view.
+  seatmapEl.scrollLeft = (seatmapEl.scrollWidth - seatmapEl.clientWidth) / 2;
+});
+seatmapBtns.skip.addEventListener('click', () => { editing.corner = null; editing.step++; drawSeatmap(); });
+seatmapBtns.clear.addEventListener('click', () => { editing = { step: AREA_STEPS.length, corner: null, areas: {} }; drawSeatmap(); });
+seatmapBtns.cancel.addEventListener('click', () => { editing = null; drawSeatmap(); });
+seatmapBtns.save.addEventListener('click', async () => {
+  seatmapBtns.save.disabled = true;
+  try {
+    const resp = await fetch(areasUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hall: seatmapData.hall, ...editing.areas }),
+    });
+    if (!resp.ok) throw new Error(resp.status);
+    editing = null;
+    loadSeatmap(seatmapShow);
+  } catch (e) {
+    seatmapEditHint.textContent = 'Could not save the areas. Try again.';
+    seatmapBtns.save.disabled = false;
+  }
+});
+
+async function loadSeatmap(m) {
+  const seq = ++seatmapSeq;
+  try {
+    const resp = await fetch(seatsUrl(m.event_id));
+    const data = await resp.json();
+    if (seq !== seatmapSeq) return;
+    if (!resp.ok) { seatmapSummary.textContent = data.error || 'Could not load the seats.'; return; }
+    seatmapData = data;
+    describeSeatmap();
+    drawSeatmap();
+  } catch (e) {
+    if (seq === seatmapSeq) seatmapSummary.textContent = 'Could not load the seats. Try again in a minute.';
+  }
+}
+
+function openSeatmap(m) {
+  const dt = new Date(m.start_time);
+  seatmapTitle.textContent = `${dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')} · ${m.auditorium || 'Seats'}`;
+  seatmapSummary.textContent = 'Loading the seats…';
+  seatmapStats.hidden = true;
+  seatmapEl.replaceChildren();
+  seatmapData = null;
+  seatmapShow = m;
+  editing = null;
+  if (m.booking_link) seatmapBook.href = m.booking_link;
+  updateSeatmapControls();
+  openSheet(seatmapOverlay);
+  loadSeatmap(m);
+}
+
 // --- Showtimes: list (by day or by free seats) and calendar, both drawn
 // from MATCHES with the same filters and the same row component. ---
 let MATCHES = {{ matches | tojson }};
@@ -422,14 +860,20 @@ let applyMatches = () => cxReload();
     const d = new Date(m.sale_start);
     return `Opens ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${hhmm(d)}`;
   };
+  // Share of free seats: in the seating areas once the scraper has the
+  // seats (webui.seat_ratio), else the feed's share of the whole hall.
+  const ratioOf = m => (m.seat_ratio != null ? m.seat_ratio : m.availability);
   // Same thresholds as webui.py's card_status_tier, so a colour means the
-  // same thing on the index and here.
+  // same thing on the index and here. No free seat in your area reads
+  // like sold out.
   function tier(m) {
     if (saleUpcoming(m)) return 'upcoming';
     if (isSoldOut(m)) return 'sold';
-    if (m.availability == null) return 'none';
-    if (m.availability >= 0.5) return 'good';
-    if (m.availability >= 0.15) return 'fair';
+    const r = ratioOf(m);
+    if (r == null) return 'none';
+    if (r < 0.005) return 'sold';
+    if (r >= 0.5) return 'good';
+    if (r >= 0.15) return 'fair';
     return 'low';
   }
   const pad = n => String(n).padStart(2, '0');
@@ -446,12 +890,15 @@ let applyMatches = () => cxReload();
     return diff === 0 ? `Today, ${label}` : diff === 1 ? `Tomorrow, ${label}` : label;
   }
 
+  const dayBell = key => bellButton(isDayWatched(key), `Push freed seats for every showtime on ${dayTitle(key)}`, () => toggleDate(key));
+
   // Matches the seats() macro in _macros.html.
   function seatStrip(m) {
     const strip = document.createElement('span');
     const t = tier(m);
     strip.className = `seats ${t}`;
-    const lit = isSoldOut(m) || m.availability == null ? 0 : Math.max(1, Math.round(m.availability * 20));
+    const r = ratioOf(m);
+    const lit = isSoldOut(m) || r == null || r < 0.005 ? 0 : Math.max(1, Math.round(r * 20));
     for (let i = 0; i < 20; i++) {
       const seat = document.createElement('i');
       if (i < lit) seat.className = 'on';
@@ -491,6 +938,13 @@ let applyMatches = () => cxReload();
       badge.title = `First seen ${formatRelative(m.fetched_at)}`;
       info.appendChild(badge);
     }
+    if (!sold && m.freed_seats) {
+      const badge = document.createElement('span');
+      badge.className = 'badge-freed';
+      badge.textContent = `+${m.freed_seats} freed`;
+      badge.title = `${m.freed_seats} seat${m.freed_seats !== 1 ? 's' : ''} freed up in the last 24 hours, the last ${formatRelative(m.freed_at)}`;
+      info.appendChild(badge);
+    }
     const tags = [];
     if (m.format) tags.push([m.format, `${m.format} screening`]);
     if (m.audio_language_code) tags.push([m.audio_language_code.toUpperCase(), `${m.audio_language} audio`]);
@@ -509,16 +963,29 @@ let applyMatches = () => cxReload();
     // Seat counts mean nothing before booking opens - the opening time
     // gets the strip's room instead.
     if (t !== 'upcoming') seats.appendChild(seatStrip(m));
-    const label = document.createElement('span');
+    const canMap = m.has_seat_map && t !== 'upcoming';
+    const label = document.createElement(canMap ? 'button' : 'span');
     label.className = `seat-label tier-${t}`;
     label.textContent = t === 'upcoming' ? saleOpensLabel(m)
       : sold ? 'Sold out'
+      : m.free_seats != null ? `${m.free_seats} of ${m.capacity} ${m.in_areas ? 'in your area' : 'free'}`
       : m.availability != null ? `${Math.round(m.availability * 100)}% free` : 'Seats unknown';
     if (t === 'upcoming') label.title = 'Booking opens at this time. The booking page can be opened before.';
+    if (canMap) {
+      label.type = 'button';
+      label.classList.add('seat-map-btn');
+      label.setAttribute('aria-label', `${label.textContent}. Show the seat map`);
+      label.addEventListener('click', () => openSeatmap(m));
+    }
     seats.appendChild(label);
 
     const book = document.createElement('div');
     book.className = 'show-book';
+    if (PICK_MODE && !sold) {
+      const bell = bellButton(isWatched(m), `Push freed seats for ${hhmm(dt)}`, () => toggleShowtime(m));
+      bell.classList.add('show-bell');
+      row.appendChild(bell);
+    }
     if (!sold && m.booking_link) {
       const a = document.createElement('a');
       a.className = 'btn';
@@ -578,7 +1045,7 @@ let applyMatches = () => cxReload();
 
   function passesFilters(m) {
     if (!m.start_time) return false;
-    if (filterLowAvail.checked && !saleUpcoming(m) && (isSoldOut(m) || (m.availability != null && m.availability < LOW_AVAILABILITY_THRESHOLD))) return false;
+    if (filterLowAvail.checked && !saleUpcoming(m) && (isSoldOut(m) || (ratioOf(m) != null && ratioOf(m) < LOW_AVAILABILITY_THRESHOLD))) return false;
     const dt = new Date(m.start_time);
     const t = hhmm(dt);
     const from = TIME_RE.test(filterTimeFrom.value) ? filterTimeFrom.value : '00:00';
@@ -595,7 +1062,7 @@ let applyMatches = () => cxReload();
   const filtered = () => MATCHES.filter(passesFilters);
   const byStart = (a, b) => (a.start_time || '').localeCompare(b.start_time || '');
   // Not on sale yet sorts after every bookable showtime, before sold out.
-  const seatsValue = m => saleUpcoming(m) ? -0.5 : isSoldOut(m) || m.availability == null ? -1 : m.availability;
+  const seatsValue = m => saleUpcoming(m) ? -0.5 : isSoldOut(m) || ratioOf(m) == null ? -1 : ratioOf(m);
 
   function renderList() {
     const items = filtered();
@@ -622,6 +1089,7 @@ let applyMatches = () => cxReload();
       count.className = 'day-count';
       count.textContent = `${shows.length} showtime${shows.length !== 1 ? 's' : ''}`;
       head.append(h, count);
+      if (PICK_MODE) head.appendChild(dayBell(key));
       section.appendChild(head);
       for (const m of shows) section.appendChild(showRow(m, false));
       listView.appendChild(section);
@@ -644,9 +1112,9 @@ let applyMatches = () => cxReload();
   }
 
   function dayTier(shows) {
-    const open = shows.filter(m => !saleUpcoming(m) && !isSoldOut(m) && m.availability != null);
+    const open = shows.filter(m => !saleUpcoming(m) && !isSoldOut(m) && ratioOf(m) != null);
     if (!open.length) return shows.some(saleUpcoming) ? 'upcoming' : 'sold';
-    return tier(open.reduce((a, b) => (b.availability > a.availability ? b : a)));
+    return tier(open.reduce((a, b) => (ratioOf(b) > ratioOf(a) ? b : a)));
   }
 
   function renderAgenda(byDay) {
@@ -659,6 +1127,7 @@ let applyMatches = () => cxReload();
     const h = document.createElement('h3');
     h.textContent = dayTitle(selectedDayKey);
     head.appendChild(h);
+    if (PICK_MODE) head.appendChild(dayBell(selectedDayKey));
     section.appendChild(head);
     for (const m of byDay.get(selectedDayKey).slice().sort(byStart)) section.appendChild(showRow(m, false));
     agenda.appendChild(section);
@@ -815,6 +1284,7 @@ let applyMatches = () => cxReload();
       distinct('format'), 'filter-format', 'format', 'formats', formatCheckboxes);
   }
 
+  redrawShowtimes = refresh;
   applyMatches = (matches) => {
     MATCHES = matches;
     showsUi.hidden = !MATCHES.length;

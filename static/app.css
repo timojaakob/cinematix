@@ -26,6 +26,9 @@
   --low: #ff6b5e;
   --sold: #4a5260;
   --seat-off: #2b313c;
+  /* A free seat on the seat map: dimmer than "fits your group", clearly lit against taken seats. */
+  --seat-free: color-mix(in srgb, var(--good) 70%, var(--seat-off));
+  --wheelchair: #6aa5ff;
   --skeleton: #1d222b;
 
   --danger: #ff6b5e;
@@ -58,6 +61,8 @@
   --low: #d2453a;
   --sold: #b9c0cb;
   --seat-off: #dde2e9;
+  --seat-free: color-mix(in srgb, var(--good) 45%, var(--seat-off));
+  --wheelchair: #2f6fd1;
   --skeleton: #e0e5ec;
 
   --danger: #c63a30;
@@ -164,7 +169,7 @@ img { display: block; max-width: 100%; }
 }
 .link-btn:hover { color: var(--text); }
 
-input[type="text"], input[type="search"], input[type="password"], input[type="time"], select {
+input[type="text"], input[type="search"], input[type="password"], input[type="time"], input[type="date"], select {
   min-height: 44px; width: 100%;
   background: var(--surface); color: var(--text);
   border: 1px solid var(--line-strong); border-radius: var(--radius-control);
@@ -356,6 +361,12 @@ details.advanced[open] summary::before { transform: rotate(45deg); }
   display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 999px;
   background: var(--brand); color: var(--on-brand); font-size: 0.75rem; font-weight: 700;
 }
+/* Freed seats: outlined in the "free" green, so it reads as seats, not as the orange "new". */
+.badge-freed {
+  display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 999px;
+  border: 1.5px solid var(--good); color: var(--good); font-size: 0.75rem; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .film.just-added { animation: added 1.6s ease-out 1; }
 @keyframes added { 0%, 100% { background: transparent; } 20% { background: color-mix(in srgb, var(--brand) 18%, transparent); } }
 .empty-state { padding: 32px 0; color: var(--muted); }
@@ -434,7 +445,7 @@ details.advanced[open] summary::before { transform: rotate(45deg); }
   padding: 10px 0 8px; background: var(--bg); border-bottom: 1px solid var(--line-strong);
 }
 .day-head h3 { font-size: 1.05rem; font-weight: 700; }
-.day-head .day-count { color: var(--muted); font-size: 0.85rem; }
+.day-head .day-count { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
 
 /* one showtime */
 .show {
@@ -442,7 +453,7 @@ details.advanced[open] summary::before { transform: rotate(45deg); }
   grid-template-columns: 4.2rem minmax(0, 1fr) auto;
   grid-template-areas:
     "time info book"
-    "seats seats seats";
+    "seats seats bell";
   column-gap: 12px; row-gap: 6px; align-items: center;
   padding: 14px 0; border-bottom: 1px solid var(--line);
 }
@@ -456,14 +467,30 @@ details.advanced[open] summary::before { transform: rotate(45deg); }
 .show-info .tag { color: var(--muted); }
 .show-seats { grid-area: seats; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .show-book { grid-area: book; }
+/* The bell sits at the right edge, under the day's bell. */
+.show-bell { grid-area: bell; justify-self: end; margin: -8px -8px -8px 0; }
+.day-head .bell { margin-right: -4px; }
 .show-book .btn { min-width: 76px; }
+.seat-map-btn {
+  background: none; border: 0; padding: 0; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  min-height: 32px; text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.seat-map-btn:hover { text-decoration-style: solid; }
+/* Bells pick which showtimes may push freed seats. */
+.bell { color: var(--faint); }
+.bell svg { width: 20px; height: 20px; }
+.bell.on { color: var(--brand); }
+.bell.on svg { fill: currentColor; }
+.day-head:has(.bell) { justify-content: flex-start; align-items: center; padding-block: 4px; }
+.day-head:has(.bell) .day-count { margin-left: auto; }
+.day-head .bell { width: 36px; height: 36px; }
 .show.sold { color: var(--muted); }
 .show.sold .show-time { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
 .show-book .sold-label { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
 @media (min-width: 760px) {
   .show {
-    grid-template-columns: 5rem minmax(0, 1fr) 15rem auto;
-    grid-template-areas: "time info seats book";
+    grid-template-columns: 5rem minmax(0, 1fr) 15rem auto auto;
+    grid-template-areas: "time info seats book bell";
     padding: 12px 0;
   }
   .show-time { align-self: center; }
@@ -569,3 +596,78 @@ html:not(.steps-js) .steps { display: none; }
 .step-actions [hidden] { display: none; }
 html:not(.steps-js) #step-next, html:not(.steps-js) #step-back { display: none; }
 .field-row select { min-width: 0; max-width: 62%; text-overflow: ellipsis; }
+
+/* ---------- seat map ----------
+   The hall on the booking site's grid: one column per seat position, so
+   aisles stay gaps and a seat sits directly behind the one with the same
+   column. Row 1 is at the screen. */
+.seatmap-stats { display: flex; gap: 24px; margin: 0 0 6px; }
+.seatmap-stat { display: grid; }
+.seatmap-stat strong { font: 700 1.5rem/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.seatmap-stat span { font-size: 0.8rem; color: var(--muted); }
+.seatmap-stat.preferred strong { color: var(--good); }
+.seatmap-stat.acceptable strong { color: var(--fair); }
+.seatmap-summary { color: var(--text-2); font-size: 0.9rem; margin: 0 0 14px; }
+.seatmap {
+  display: grid; grid-template-columns: 1.8rem repeat(var(--cols), minmax(5px, 14px)); gap: 2px;
+  justify-content: center; overflow-x: auto; padding: 2px 2px 4px;
+}
+.seatmap-screen {
+  grid-row: 1; grid-column: 2 / -1; margin-bottom: 10px; padding-top: 4px; text-align: center;
+  font-size: 0.75rem; color: var(--muted);
+  border-top: 3px solid var(--line-strong); border-radius: 50% 50% 0 0 / 8px 8px 0 0;
+}
+.seatmap-row-name { grid-column: 1; align-self: center; font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Seating areas: a box over the seats it spans, its border drawn in the gaps. */
+.seatmap-area { z-index: 1; margin: -2px; border: 2px solid; border-radius: 4px; pointer-events: none; }
+.seatmap-area.preferred { border-color: var(--good); }
+.seatmap-area.acceptable { border-color: var(--fair); margin: -3px; }
+.seatmap i.outside { opacity: 0.35; }
+/* Editing needs seats big enough to tap: the hall scrolls sideways instead. */
+.seatmap.editing { grid-template-columns: 1.8rem repeat(var(--cols), 16px); justify-content: start; }
+.seatmap.editing i { cursor: pointer; }
+.seatmap.editing { padding-left: 0; }
+.seatmap.editing .seatmap-row-name {
+  position: sticky; left: 0; z-index: 2; align-self: stretch; display: flex; align-items: center;
+  background: var(--surface); box-shadow: 2px 0 0 var(--surface);
+}
+.seatmap.editing i:hover, .seatmap i.corner { outline: 2px solid var(--focus); outline-offset: 1px; }
+.seatmap-edit-hint { margin: 0 0 10px; font-size: 0.9rem; font-weight: 600; color: var(--text); }
+.area-key { display: inline-block; width: 14px; height: 10px; border: 2px solid; border-radius: 3px; margin-left: 6px; }
+.area-key:first-child { margin-left: 0; }
+.area-key.preferred { border-color: var(--good); }
+.area-key.acceptable { border-color: var(--fair); }
+.seatmap i, .seatmap-legend i {
+  display: block; width: 100%; aspect-ratio: 1; align-self: center;
+  border-radius: 3px 3px 1px 1px; background: var(--seat-off);
+}
+.seatmap i.free, .seatmap-legend i.free { background: var(--seat-free); }
+.seatmap i.freed, .seatmap-legend i.freed { background: var(--good); box-shadow: 0 0 0 1.5px var(--text); }
+.seatmap i.fits, .seatmap-legend i.fits { background: var(--good); }
+/* Wheelchair spaces: blue like the booking site's icon, never green, since they don't count as free seats. */
+.seatmap i.wheelchair, .seatmap-legend i.wheelchair { border-radius: 50%; background: var(--seat-off); box-shadow: inset 0 0 0 1.5px var(--wheelchair); }
+.seatmap i.wheelchair.free, .seatmap i.wheelchair.freed, .seatmap-legend i.wheelchair { background: color-mix(in srgb, var(--wheelchair) 45%, var(--seat-off)); box-shadow: none; }
+.seatmap-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 0.8rem; color: var(--muted); }
+.seatmap-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.seatmap-legend i { width: 12px; }
+
+/* ---------- watch rules (movie settings) ---------- */
+.watch-rules { margin-top: 12px; display: grid; gap: 10px; }
+.watch-rule { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.rule-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.rule-days .chip { justify-content: center; min-height: 34px; padding: 0; font-size: 0.82rem; }
+/* Label above, the two inputs side by side, so 12-hour times fit on phones. */
+.rule-range {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px 8px;
+  align-items: center; font-size: 0.85rem; color: var(--text-2);
+}
+.rule-range > span:first-child { grid-column: 1 / -1; font-weight: 600; }
+.rule-range input { width: 100%; min-width: 0; padding-inline: 10px; }
+.watch-rule .link-btn { justify-self: start; }
+.watch-rules-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chip-btn {
+  min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px dashed var(--line-strong);
+  background: transparent; color: var(--text-2); font: inherit; font-size: 0.85rem; cursor: pointer;
+}
+.chip-btn:hover { color: var(--text); border-style: solid; }
+#watch-rules { display: grid; gap: 10px; }

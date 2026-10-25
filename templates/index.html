@@ -68,11 +68,16 @@
               {{ seats(0, 'sold', 'Sold out') }}
               <span class="summary">Sold out, {{ m.showtime_count }} showtime{{ 's' if m.showtime_count != 1 else '' }}</span>
             {% else %}
-              {% set pct = (m.best_availability * 100) | round | int %}
-              {{ seats(m.best_availability, tier, 'Best showtime ' ~ pct ~ '% free') }}
-              <span class="summary"><span class="seat-label tier-{{ tier }}">{{ pct }}% free</span> at best, {{ m.open_count }} on sale{% if m.upcoming_count %}, {{ m.upcoming_count }} more from {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}{% endif %}</span>
+              {% if m.best_free_seats is not none %}
+                {% set best_label = m.best_free_seats ~ (' free in your area' if m.best_in_areas else ' free') %}
+              {% else %}
+                {% set best_label = ((m.best_availability * 100) | round | int) ~ '% free' %}
+              {% endif %}
+              {{ seats(m.best_availability, tier, 'Best showtime: ' ~ best_label) }}
+              <span class="summary"><span class="seat-label tier-{{ tier }}">{{ best_label }}</span> at best, {{ m.open_count }} on sale{% if m.upcoming_count %}, {{ m.upcoming_count }} more from {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}{% endif %}</span>
             {% endif %}
             {% if m.new_count %}<span class="badge-new">{{ m.new_count }} new</span>{% endif %}
+            {% if m.freed_seats %}<span class="badge-freed" title="Freed up in the last 24 hours and still free">+{{ m.freed_seats }} seat{{ 's' if m.freed_seats != 1 else '' }} freed</span>{% endif %}
           </div>
           <div class="film-meta">
             {% if m.check_interval_seconds is none %}

@@ -8,9 +8,10 @@ film-events feed builds on ra100/cinema-loader):
 - www.cinemacity.cz/cz/data-api-service - the showtime feed behind the
   site's "buy tickets" pages: cinemas, dates with screenings, and one day's
   films and events.
-- tickets.cinemacity.cz/api - the booking site's own API. Only its
-  presentation endpoint is used, for the booking open time, which the feed
-  doesn't carry.
+- tickets.cinemacity.cz/api - the booking site's own API. Its presentation
+  endpoint gives the booking open time, which the feed doesn't carry, and
+  the hall's ids. The seat plan and seat status endpoints give the hall
+  layout and which seats are free.
 
 Schema confirmed against live data on 2026-07-17 (feed) and 2026-10-21
 (cinema list, presentations, formats across all 13 CZ cinemas).
@@ -18,6 +19,7 @@ Schema confirmed against live data on 2026-07-17 (feed) and 2026-10-21
 
 import logging
 import time
+import uuid
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -45,11 +47,21 @@ FEED_BASE = f"https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/{SITE_I
 # the TMDb title.
 FEED_PARAMS = "?attr=&lang=en_US"
 PRESENTATION_URL = "https://tickets.cinemacity.cz/api/presentations/{id}"
+SEATPLAN_URL = "https://tickets.cinemacity.cz/api/seats/seatplan?venueId={venue}&seatplanId={plan}"
+SEAT_STATUS_URL = (
+    "https://tickets.cinemacity.cz/api/seats/seats-statusV2"
+    "?presentationId={id}&venueTypeId={venue_type}&isReserved={reserved}"
+)
 
 HEADERS = {
     "User-Agent": f"cinematix/{__version__} (+https://github.com/timojaakob/cinematix)",
     "Accept": "application/json",
 }
+
+# The seat status endpoint answers 403 without a "uuid" header. The booking
+# site makes one up per visitor (any UUID v4 works, no cookie needed -
+# checked live on 2026-10-25), so one per process is enough.
+BOOKING_SESSION_HEADERS = {"uuid": str(uuid.uuid4())}
 
 # Network errors and 5xx get retried after these delays. 403/429 never get
 # retried - hammering a rate limit or bot challenge is how you get banned.
@@ -78,11 +90,12 @@ def _retry_after_seconds(resp: requests.Response) -> int | None:
         return None
 
 
-def get_json(url: str, what: str) -> dict:
+def get_json(url: str, what: str, extra_headers: dict | None = None) -> dict:
+    headers = {**HEADERS, **(extra_headers or {})}
     for attempt in range(len(FETCH_RETRY_DELAYS_SECONDS) + 1):
         last_attempt = attempt == len(FETCH_RETRY_DELAYS_SECONDS)
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = requests.get(url, headers=headers, timeout=15)
         except requests.RequestException as e:
             if not last_attempt:
                 time.sleep(FETCH_RETRY_DELAYS_SECONDS[attempt])
@@ -292,6 +305,12 @@ def fetch_sale_info(event_id: str) -> dict:
             "sale_start": booking_site_time(p.get("ticketSaleStart")),
             "sale_stop": booking_site_time(p.get("ticketSaleStop")),
             "member_only": bool(p.get("isMemberSaleOnly")),
+            # The hall, for the seat plan and seat status endpoints. None
+            # when missing, so the caller doesn't fetch again for it.
+            "venue_id": p.get("venueId"),
+            "seatplan_id": p.get("seatplanId"),
+            "venue_type_id": p.get("venueTypeId"),
+            "is_reserved": bool(p.get("isReserved")),
         }
     err = payload.get("error")
     if not isinstance(err, dict):
@@ -305,3 +324,43 @@ def fetch_sale_info(event_id: str) -> dict:
         # fields only an open screening returns.
         return {"sale_start": sale_start, "sale_stop": None, "member_only": False, "locked": True}
     raise FetchError("invalid", f"{what}: {code or 'unknown error'} ({err.get('message')})")
+
+
+def fetch_seatplan(venue_id, seatplan_id) -> dict[str, list[str]]:
+    """Every seat of a hall as {key: [row name, seat name]}. The key is
+    "{section}_{x}_{y}", the same key the seat status endpoint uses. x and y
+    are grid positions: seats next to each other differ by 1 in x, an aisle
+    is a missing x, and the row behind has y + 1 (row 1 is at the screen).
+    Halls are drawn on this grid, so the same x in the next row is directly
+    behind. Seat names starting with "V" are wheelchair spaces. Checked live
+    on 2026-10-25 against all 27 halls of Flora and Chodov: one section each,
+    and the seat count equals the section's Capacity.
+
+    Raises FetchError."""
+    what = f"seat plan {venue_id}/{seatplan_id}"
+    payload = get_json(SEATPLAN_URL.format(venue=venue_id, plan=seatplan_id), what)
+    seats: dict[str, list[str]] = {}
+    for section_id, section in (payload.get("sections") or {}).items():
+        for group in (section.get("groups") or {}).values():
+            for row in (group.get("rows") or {}).values():
+                for x, seat in (row.get("seats") or {}).items():
+                    key = f"{section_id}_{x}_{seat.get('YCoordinate', row.get('YCoordinate'))}"
+                    seats[key] = [str(seat.get("RowName") or row.get("RowName") or ""), str(seat.get("SeatName") or "")]
+    if not seats:
+        raise FetchError("invalid", f"{what}: no seats ({str(payload)[:200]})")
+    return seats
+
+
+def fetch_free_seats(event_id: str, venue_type_id, is_reserved: bool) -> list[str]:
+    """Keys (see fetch_seatplan) of the seats that are free right now. The
+    endpoint lists only free seats, each with the value 0: for Dune at Flora
+    IMAX on 2026-10-25 it listed 55 seats while the feed said 14.29% of 385.
+    Raises FetchError."""
+    what = f"seat status {event_id}"
+    url = SEAT_STATUS_URL.format(id=event_id, venue_type=venue_type_id, reserved=1 if is_reserved else 0)
+    seats = get_json(url, what, BOOKING_SESSION_HEADERS).get("seats")
+    if seats in (None, [], {}):
+        return []
+    if not isinstance(seats, dict):
+        raise FetchError("invalid", f"{what}: unexpected JSON shape")
+    return sorted(key for key, value in seats.items() if value == 0)

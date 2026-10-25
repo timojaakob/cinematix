@@ -125,3 +125,50 @@ def test_cinema_day_link():
 def test_user_agent_identifies_the_project():
     assert "cinematix/" in cinemacity.HEADERS["User-Agent"]
     assert "github.com/timojaakob/cinematix" in cinemacity.HEADERS["User-Agent"]
+
+
+def test_fetch_sale_info_open_has_hall(monkeypatch):
+    monkeypatch.setattr(cinemacity, "get_json", lambda url, what: load_fixture("presentation_open.json"))
+    info = cinemacity.fetch_sale_info("267914")
+    assert (info["venue_id"], info["seatplan_id"], info["venue_type_id"], info["is_reserved"]) == (80, 1, 1, True)
+
+
+def test_fetch_seatplan_imax(monkeypatch):
+    urls = []
+    def fake(url, what):
+        urls.append(url)
+        return load_fixture("seatplan_imax.json")
+
+    monkeypatch.setattr(cinemacity, "get_json", fake)
+    plan = cinemacity.fetch_seatplan(80, 1)
+    assert urls == ["https://tickets.cinemacity.cz/api/seats/seatplan?venueId=80&seatplanId=1"]
+    assert len(plan) == 385  # the section's Capacity
+    assert plan["1_8_1"] == ["1", "23"]
+    assert sum(1 for row, seat in plan.values() if seat.startswith("V")) == 6
+
+
+def test_fetch_seatplan_rejects_empty(monkeypatch):
+    monkeypatch.setattr(cinemacity, "get_json", lambda url, what: {"sections": {}})
+    with pytest.raises(FetchError):
+        cinemacity.fetch_seatplan(80, 1)
+
+
+def test_fetch_free_seats(monkeypatch):
+    calls = []
+
+    def fake(url, what, extra_headers=None):
+        calls.append((url, extra_headers))
+        return load_fixture("seat_status_imax.json")
+
+    monkeypatch.setattr(cinemacity, "get_json", fake)
+    free = cinemacity.fetch_free_seats("269275", 1, True)
+    assert len(free) == 241  # 0.6416 of 385
+    url, headers = calls[0]
+    assert url.endswith("seats-statusV2?presentationId=269275&venueTypeId=1&isReserved=1")
+    assert headers["uuid"]
+
+
+@pytest.mark.parametrize("seats", [{}, [], None])
+def test_fetch_free_seats_sold_out(monkeypatch, seats):
+    monkeypatch.setattr(cinemacity, "get_json", lambda url, what, extra_headers=None: {"seats": seats})
+    assert cinemacity.fetch_free_seats("1", 1, True) == []

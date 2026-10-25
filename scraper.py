@@ -6,9 +6,10 @@ ntfy notifications for new showtimes and freed-up seats.
 
 Reads config.json (movies and settings, reloaded every cycle so web UI
 changes apply without a restart). Writes state.json (what was already
-notified, seat baselines, sale times, per-movie last check) and
-results.json (current matches, shown by the web UI). The API client and
-parsing live in cinemacity.py.
+notified, seat baselines, free seats, sale times, per-movie last check),
+results.json (current matches, shown by the web UI) and seatplans.json
+(hall layouts). The API client and parsing live in cinemacity.py, the
+seat group rules in seats.py.
 """
 
 import json
@@ -23,6 +24,7 @@ import requests
 from flask import Flask, request
 
 import cinemacity
+import seats
 import storage
 from cinemacity import FetchError
 from version import __version__
@@ -38,10 +40,11 @@ FALLBACK_RANGE_DAYS = int(os.environ.get("FALLBACK_RANGE_DAYS", "150"))
 DATES_LOOKAHEAD_DAYS = int(os.environ.get("DATES_LOOKAHEAD_DAYS", "365"))
 FULL_SCAN_INTERVAL_SECONDS = int(os.environ.get("FULL_SCAN_INTERVAL_SECONDS", "3600"))
 FALLBACK_SCAN_MIN_INTERVAL_SECONDS = int(os.environ.get("FALLBACK_SCAN_MIN_INTERVAL_SECONDS", "300"))
-# Notify again for an already-notified event when its availability rises by
-# more than this over the lowest value seen since the last notification -
-# catches screenings listed before going on sale, sold-out shows that
-# reopen, and seats released from expired baskets after a drop.
+# Without seat data for a showtime (no seat plan, or the booking site
+# fails), notify again for an already-notified event when its availability
+# rises by more than this over the lowest value seen since the last
+# notification - catches screenings listed before going on sale, sold-out
+# shows that reopen, and seats released from expired baskets after a drop.
 # availabilityRatio has 4 decimals (checked live on 2026-10-21), fine
 # enough to show a single seat even in the IMAX hall, so the default 0
 # means "any returned seat".
@@ -66,6 +69,13 @@ PRESENTATION_REFRESH_SECONDS = 3600
 # Caps the extra requests a newly monitored movie with many showtimes causes;
 # the rest get fetched over the next cycles.
 PRESENTATION_FETCHES_PER_CYCLE = 40
+# Free seats are fetched for showtimes whose availability changed since the
+# last fetch, at most this many per cycle.
+SEAT_FETCHES_PER_CYCLE = 40
+SEATPLAN_FETCHES_PER_CYCLE = 10
+# Hall layouts hardly ever change; a seat missing from the cached layout
+# also triggers a refetch.
+SEATPLAN_REFRESH_SECONDS = 7 * 86400
 # Internal port webui.py calls to trigger an immediate check. Bound to
 # localhost: both processes run in the same container.
 CONTROL_PORT = 5001
@@ -111,7 +121,7 @@ def cinema_from(settings: dict) -> dict:
     }
 
 
-# --- Sale times ------------------------------------------------------------
+# --- Booking site ----------------------------------------------------------
 
 def _seconds_since(iso: str | None, now: datetime) -> float:
     if not iso:
@@ -120,6 +130,24 @@ def _seconds_since(iso: str | None, now: datetime) -> float:
         return (now - datetime.fromisoformat(iso)).total_seconds()
     except ValueError:
         return float("inf")
+
+
+def booking_site_reachable(state: dict, now: datetime) -> bool:
+    """False while backing off after the booking site blocked us. Sale times,
+    seat plans and free seats all come from it, so they share the backoff."""
+    return _seconds_since(state.get("booking_site_backoff_until"), now) >= 0
+
+
+def booking_site_failed(state: dict, err: FetchError, now: datetime, what: str) -> None:
+    """For network and blocked errors: stop asking the booking site this
+    cycle, and for a while if it blocked us."""
+    if err.kind == "blocked":
+        until = now + timedelta(seconds=max(BACKOFF_MAX_SECONDS, err.retry_after or 0))
+        state["booking_site_backoff_until"] = until.isoformat(timespec="seconds")
+    log.warning("Stopped fetching %s this cycle: %s", what, err)
+
+
+# --- Sale times ------------------------------------------------------------
 
 
 def attach_sale_info(results: list[dict], state: dict, now: datetime, may_fetch: bool) -> None:
@@ -137,13 +165,15 @@ def attach_sale_info(results: list[dict], state: dict, now: datetime, may_fetch:
             return True
         if info.get("failed"):
             return _seconds_since(info.get("checked_at"), now) >= PRESENTATION_REFRESH_SECONDS
+        if not info.get("locked") and "venue_id" not in info:
+            return True  # cached before seat plans existed
         if not info.get("sale_start"):
             return False
         if info["sale_start"] <= now_s:
             return bool(info.get("locked"))
         return _seconds_since(info.get("checked_at"), now) >= PRESENTATION_REFRESH_SECONDS
 
-    if may_fetch and _seconds_since(state.get("sale_info_backoff_until"), now) >= 0:
+    if may_fetch and booking_site_reachable(state, now):
         # Never-fetched events first, so a new showtime's push can say when
         # booking opens.
         todo = sorted({r["event_id"] for r in results if needs_fetch(r["event_id"])}, key=lambda e: e in cache)
@@ -152,10 +182,7 @@ def attach_sale_info(results: list[dict], state: dict, now: datetime, may_fetch:
                 cache[eid] = dict(cinemacity.fetch_sale_info(eid), checked_at=now_s)
             except FetchError as e:
                 if e.kind in ("network", "blocked"):
-                    if e.kind == "blocked":
-                        until = now + timedelta(seconds=max(BACKOFF_MAX_SECONDS, e.retry_after or 0))
-                        state["sale_info_backoff_until"] = until.isoformat(timespec="seconds")
-                    log.warning("Stopped fetching sale start times this cycle: %s", e)
+                    booking_site_failed(state, e, now, "sale start times")
                     break
                 log.warning("No sale start time for event %s: %s", eid, e)
                 # Keeps a previously known time; retried after PRESENTATION_REFRESH_SECONDS.
@@ -165,6 +192,172 @@ def attach_sale_info(results: list[dict], state: dict, now: datetime, may_fetch:
         r["sale_start"] = info.get("sale_start")
         r["sale_stop"] = info.get("sale_stop")
         r["member_only"] = info.get("member_only", False)
+        for key in ("venue_id", "seatplan_id", "venue_type_id", "is_reserved"):
+            r[key] = info.get(key)
+
+
+# --- Seats -------------------------------------------------------------------
+
+def areas_for(r: dict, settings: dict) -> dict:
+    if r.get("venue_id") is None:
+        return {}
+    return storage.seat_areas(settings, storage.seatplan_key(r["venue_id"], r["seatplan_id"]))
+
+
+def plan_for(r: dict, plans: dict) -> dict | None:
+    """The cached layout of a showtime's hall, or None if there's no usable
+    one (unknown hall, a hall without seat numbers, or a failed fetch)."""
+    if r.get("venue_id") is None or not r.get("is_reserved"):
+        return None
+    plan = plans.get(storage.seatplan_key(r["venue_id"], r["seatplan_id"]))
+    return (plan or {}).get("seats") or None
+
+
+def update_seatplans(results: list[dict], plans: dict, state: dict, now: datetime, may_fetch: bool) -> bool:
+    """Fetches the layout of each hall in results that isn't cached, is
+    older than SEATPLAN_REFRESH_SECONDS, or was marked stale. Returns
+    whether plans changed."""
+    if not may_fetch or not booking_site_reachable(state, now):
+        return False
+    todo: dict[str, tuple] = {}
+    for r in results:
+        if r.get("venue_id") is None or not r.get("is_reserved"):
+            continue
+        key = storage.seatplan_key(r["venue_id"], r["seatplan_id"])
+        plan = plans.get(key)
+        if plan and not plan.get("stale") and _seconds_since(plan.get("fetched_at"), now) < SEATPLAN_REFRESH_SECONDS:
+            continue
+        todo[key] = (r["venue_id"], r["seatplan_id"])
+    now_s = now.isoformat(timespec="seconds")
+    changed = False
+    for key, (venue_id, seatplan_id) in list(todo.items())[:SEATPLAN_FETCHES_PER_CYCLE]:
+        try:
+            plans[key] = {"seats": cinemacity.fetch_seatplan(venue_id, seatplan_id), "fetched_at": now_s}
+        except FetchError as e:
+            if e.kind in ("network", "blocked"):
+                booking_site_failed(state, e, now, "seat plans")
+                break
+            log.warning("No seat plan for hall %s: %s", key, e)
+            # Keeps a previously known layout; retried after SEATPLAN_REFRESH_SECONDS.
+            plans[key] = {"seats": (plans.get(key) or {}).get("seats") or {}, "fetched_at": now_s}
+        changed = True
+    return changed
+
+
+def record_free_seats(seat_state: dict, eid: str, free: list[str], ratio: float | None, now: datetime) -> None:
+    """Stores a fetch of free seats. "baseline" is the low-water mark: the
+    seats free in every fetch since the last push, so free minus baseline
+    are the seats freed since then. "freed" keeps when each still-free seat
+    came back, for the web UI."""
+    now_s = now.isoformat(timespec="seconds")
+    free_set = set(free)
+    rec = seat_state.get(eid)
+    if rec is None:
+        # First look at a showtime on sale: nothing counts as freed yet.
+        baseline, previous, freed = free_set, free_set, {}
+    else:
+        baseline = set(rec["baseline"]) & free_set
+        # Seats appearing when booking opens weren't freed by anyone.
+        previous = free_set if rec.get("closed") == "upcoming" else set(rec["free"])
+        freed = {
+            k: t for k, t in rec.get("freed", {}).items()
+            if k in free_set and _seconds_since(t, now) < storage.FREED_SEATS_WINDOW_SECONDS
+        }
+        freed.update({k: now_s for k in free_set - previous})
+    seat_state[eid] = {
+        "free": sorted(free_set), "baseline": sorted(baseline), "ratio": ratio, "checked_at": now_s, "freed": freed,
+    }
+
+
+def update_seats(
+    results: list[dict], state: dict, plans: dict, movies_by_id: dict, now: datetime, may_fetch: bool,
+) -> bool:
+    """Fetches the free seats of showtimes whose availability changed since
+    the last fetch - all of them, not only watched ones, since the web UI
+    counts free seats in the seating areas. A showtime that is sold out or not on sale yet is
+    recorded with no free seats and isn't fetched, so every seat counts as
+    freed once it opens. Sets r["seat_pending"] when a fetch was due but
+    hit SEAT_FETCHES_PER_CYCLE, so the push waits for the seat data.
+    Returns whether a hall layout was marked stale."""
+    seat_state: dict[str, dict] = state.setdefault("seats", {})
+    now_s = now.isoformat(timespec="seconds")
+    allowed = may_fetch and booking_site_reachable(state, now)
+    fetches = 0
+    stale = False
+    for r in results:
+        eid = r["event_id"]
+        if r["sold_out"] or _sale_upcoming(r, now):
+            # Recorded even without a known hall: a locked showtime has no
+            # hall ids until booking opens.
+            seat_state[eid] = {
+                "free": [], "baseline": [], "ratio": r["availability"], "checked_at": now_s, "freed": {},
+                "closed": "sold" if r["sold_out"] else "upcoming",
+            }
+            continue
+        plan = plan_for(r, plans)
+        if plan is None:
+            continue
+        rec = seat_state.get(eid)
+        if rec and not rec.get("closed") and rec.get("ratio") == r["availability"]:
+            continue
+        if not allowed:
+            continue
+        if fetches >= SEAT_FETCHES_PER_CYCLE:
+            r["seat_pending"] = True
+            continue
+        fetches += 1
+        try:
+            free = cinemacity.fetch_free_seats(eid, r["venue_type_id"], r["is_reserved"])
+        except FetchError as e:
+            if e.kind in ("network", "blocked"):
+                booking_site_failed(state, e, now, "free seats")
+                allowed = False
+            else:
+                log.warning("No free seats for event %s: %s", eid, e)
+            continue
+        if any(k not in plan for k in free):
+            log.info("Seat plan of hall %s/%s changed, fetching it again", r["venue_id"], r["seatplan_id"])
+            plans[storage.seatplan_key(r["venue_id"], r["seatplan_id"])]["stale"] = True
+            stale = True
+        record_free_seats(seat_state, eid, free, r["availability"], now)
+    return stale
+
+
+def current_seats(r: dict, state: dict) -> dict | None:
+    """The showtime's seat record if it matches its current availability."""
+    rec = state.get("seats", {}).get(r["event_id"])
+    if rec and not rec.get("closed") and rec.get("ratio") == r["availability"]:
+        return rec
+    return None
+
+
+def annotate_seats(results: list[dict], state: dict, plans: dict, now: datetime, settings: dict) -> None:
+    """Adds what the web UI shows, all counted inside the hall's seating
+    areas (the whole hall without areas) and without wheelchair spaces:
+    capacity, free_seats and seat_ratio (None until the seats were fetched
+    for the current availability), freed_seats and freed_at (seats freed
+    within FREED_SEATS_WINDOW_SECONDS that are still free), in_areas and
+    has_seat_map."""
+    for r in results:
+        plan = plan_for(r, plans)
+        areas = areas_for(r, settings)
+        rec = current_seats(r, state)
+        r["has_seat_map"] = plan is not None
+        r["in_areas"] = plan is not None and any(areas.values())
+        r["capacity"] = len(seats.in_areas(seats.usable(plan, plan), areas)) if plan else None
+        if rec and plan and r["capacity"]:
+            r["free_seats"] = len(seats.in_areas(seats.usable(rec["free"], plan), areas))
+            r["seat_ratio"] = r["free_seats"] / r["capacity"]
+        else:
+            r["free_seats"] = r["seat_ratio"] = None
+        window = storage.FREED_SEATS_WINDOW_SECONDS
+        freed = [
+            t for k, t in (rec or {}).get("freed", {}).items()
+            if _seconds_since(t, now) < window and seats.area_of(k, areas)
+            and k in (plan or {}) and not seats.is_wheelchair(plan[k][1])
+        ]
+        r["freed_seats"] = len(freed)
+        r["freed_at"] = max(freed, default=None)
 
 
 # --- Matching --------------------------------------------------------------
@@ -239,13 +432,26 @@ def process_day(
 
 # --- Notifications ---------------------------------------------------------
 
-def pick_notifications(fresh: list[dict], state: dict) -> list[dict]:
+def pick_notifications(
+    fresh: list[dict], state: dict, movies_by_id: dict | None = None, plans: dict | None = None,
+    settings: dict | None = None,
+) -> list[dict]:
     """Which freshly fetched showtimes to notify about: never-notified ones
-    that aren't sold out ("new"), plus already-notified ones whose
-    availability rose by more than AVAILABILITY_RISE_THRESHOLD over the
-    lowest value seen since their last notification ("more_seats").
-    Updates the low-water marks in state as a side effect; the caller
-    resets them for the events it actually notified about."""
+    that aren't sold out ("new"), plus already-notified, watched ones where
+    seats freed up since their last notification ("more_seats").
+
+    With current seat data, seats freed up means the free seats now hold a
+    group of the movie's seats_wanted inside the hall's seating areas that
+    uses at least one freed seat (see seats.py). Without it,
+    the availability must have risen by more than
+    AVAILABILITY_RISE_THRESHOLD over the lowest value seen since the last
+    notification, and by at least seats_wanted seats if the hall size is
+    known. Updates the availability low-water marks in state as a side
+    effect; the caller resets them for the events it actually notified
+    about."""
+    movies_by_id = movies_by_id or {}
+    plans = plans or {}
+    settings = settings or {}
     notified = set(state["notified_event_ids"])
     baselines: dict[str, float] = state.setdefault("availability_baseline", {})
     picks = []
@@ -263,8 +469,38 @@ def pick_notifications(fresh: list[dict], state: dict) -> list[dict]:
             baselines[eid] = avail
             continue
         baselines[eid] = min(baselines[eid], avail)
-        if not r["sold_out"] and avail - baselines[eid] > AVAILABILITY_RISE_THRESHOLD:
-            picks.append(dict(r, notify_kind="more_seats", previous_availability=baselines[eid]))
+        movie = movies_by_id.get(r.get("movie_id"), {})
+        if r["sold_out"] or r.get("seat_pending") or not storage.watches_showtime(movie, r):
+            continue
+        wanted = storage.seats_wanted(movie)
+        pick = dict(r, notify_kind="more_seats", previous_availability=baselines[eid], seats_wanted=wanted)
+        rec = current_seats(r, state)
+        plan = plan_for(r, plans)
+        if rec and plan:
+            areas = areas_for(r, settings)
+            free = seats.usable(rec["free"], plan)
+            freed = free - set(rec["baseline"])
+            groups = seats.best_groups(free, freed, wanted, areas)
+            if groups:
+                area, group = groups[0]
+                picks.append(dict(
+                    pick,
+                    freed_count=len(seats.in_areas(freed, areas)),
+                    free_count=len(seats.in_areas(free, areas)),
+                    # Only worth naming when the hall has areas.
+                    area=area if any(areas.values()) else None,
+                    group=seats.describe(group, plan) if wanted > 1 else None,
+                ))
+            continue
+        if avail - baselines[eid] <= AVAILABILITY_RISE_THRESHOLD:
+            continue
+        capacity = r.get("capacity")
+        if capacity:
+            freed_count = round((avail - baselines[eid]) * capacity)
+            if freed_count < wanted:
+                continue
+            pick.update(freed_count=freed_count, free_count=round(avail * capacity))
+        picks.append(pick)
     return picks
 
 
@@ -303,10 +539,18 @@ def summarize_more_seats(picks: list[dict]) -> tuple[str, str]:
             when = datetime.fromisoformat(p["start_time"]).strftime("%a %d %b %H:%M")
         except (TypeError, ValueError):
             when = p["date"]
-        lines.append(
-            f"{p['movie_name']} {p['format']}, {when}: "
-            f"{p['previous_availability']:.1%} -> {p['availability']:.1%} free"
-        )
+        line = f"{p['movie_name']} {p['format']}, {when}: "
+        if p.get("freed_count") is None:
+            line += f"{p['previous_availability']:.1%} -> {p['availability']:.1%} free"
+        else:
+            there = " in your areas" if p.get("area") else ""
+            line += f"+{p['freed_count']} seat{'s' if p['freed_count'] != 1 else ''}{there}, {p['free_count']} free now"
+            if p.get("group"):
+                line += f". {p['seats_wanted']} together"
+                if p.get("area"):
+                    line += f" in the {p['area']} area"
+                line += f": {p['group']}"
+        lines.append(line)
     return title, "\n".join(lines)
 
 
@@ -337,7 +581,7 @@ FORCE_CHECK_IDS: set[str] = set()
 
 # Per-event and per-cinema state that must not carry over to another cinema.
 CINEMA_SCOPED_STATE = (
-    "notified_event_ids", "availability_baseline", "sale_info", "last_dates",
+    "notified_event_ids", "availability_baseline", "seats", "sale_info", "last_dates",
     "last_checked", "last_full_scan_at", "full_scan_pending_check",
 )
 
@@ -503,9 +747,18 @@ def run_once(state: dict) -> None:
             log.warning("Cycle stopped early (%s), keeping previous results for unfetched days", cycle_error)
         # Offline or blocked: don't add requests to another host on top, use
         # cached sale times only.
-        attach_sale_info(
-            results, state, now, may_fetch=not (cycle_error and cycle_error.kind in ("network", "blocked"))
-        )
+        may_fetch = not (cycle_error and cycle_error.kind in ("network", "blocked"))
+        attach_sale_info(results, state, now, may_fetch)
+        # The same event can come back for two dates (and so twice in a
+        # cycle) - keep one per event_id.
+        fresh = list({r["event_id"]: r for r in results}.values())
+        movies_by_id = {m["id"]: m for m in config["movies"]}
+        plans = storage.load_seatplans()
+        plans_changed = update_seatplans(fresh, plans, state, now, may_fetch)
+        plans_changed |= update_seats(fresh, state, plans, movies_by_id, now, may_fetch)
+        if plans_changed:
+            storage.save_seatplans(plans)
+        annotate_seats(fresh, state, plans, now, settings)
         listed_at_scan = state.pop("full_scan_pending_check", None)
         if listed_at_scan is not None and not cycle_error:
             missing = sorted(days_with_events - set(listed_at_scan))
@@ -535,10 +788,7 @@ def run_once(state: dict) -> None:
             return True
 
         preserved = [r for r in previous_matches if keep_previous(r)]
-        # The same event can come back for two dates (and so twice in a
-        # cycle, or once fresh and once preserved) - keep one per event_id,
-        # preferring the freshly fetched entry.
-        fresh = list({r["event_id"]: r for r in results}.values())
+        # An event can be both fresh and preserved - prefer the fresh entry.
         combined = list({r["event_id"]: r for r in preserved + fresh}.values())
         combined.sort(key=lambda r: r["start_time"] or "")
         storage.save_results(combined)
@@ -556,7 +806,7 @@ def run_once(state: dict) -> None:
 
         # Notify about whatever was found even if the cycle failed partway -
         # a broken later day must never hold back a ticket drop.
-        picks = pick_notifications(fresh, state)
+        picks = pick_notifications(fresh, state, movies_by_id, plans, settings)
         for kind in ("new", "more_seats"):
             group = [p for p in picks if p["notify_kind"] == kind]
             # Only mark these as notified if the push actually went through, so a
@@ -568,9 +818,12 @@ def run_once(state: dict) -> None:
                         state["notified_event_ids"].append(p["event_id"])
                     if p["availability"] is not None:
                         state["availability_baseline"][p["event_id"]] = p["availability"]
-        # Only track baselines and sale times for showtimes still in the results.
+                    seat_rec = state.get("seats", {}).get(p["event_id"])
+                    if seat_rec:
+                        seat_rec["baseline"] = seat_rec["free"]
+        # Only track baselines, seats and sale times for showtimes still in the results.
         live_ids = {r["event_id"] for r in combined}
-        for key in ("availability_baseline", "sale_info"):
+        for key in ("availability_baseline", "seats", "sale_info"):
             state[key] = {k: v for k, v in state.get(key, {}).items() if k in live_ids}
         state["last_checked"] = {k: v for k, v in state.get("last_checked", {}).items() if k in configured_ids}
 

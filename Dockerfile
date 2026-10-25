@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # mounts.
 RUN useradd --create-home --uid 1000 --user-group cinematix && mkdir /data && chown cinematix:cinematix /data
 
-COPY version.py cinemacity.py storage.py scraper.py webui.py entrypoint.sh ./
+COPY version.py cinemacity.py seats.py storage.py scraper.py webui.py entrypoint.sh ./
 COPY templates/ templates/
 COPY static/ static/
 RUN chmod +x entrypoint.sh
