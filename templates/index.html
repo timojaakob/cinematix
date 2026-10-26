@@ -1,95 +1,111 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import seats %}
+{% from "_macros.html" import seats, heat_strip %}
+{% block wrap_class %} wide{% endblock %}
 
 {% block content %}
-  <div class="search">
-    <label for="movie-search" class="visually-hidden">Add a movie to monitor</label>
-    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>
-    </svg>
-    <input type="search" id="movie-search" placeholder="Add a movie to monitor" autocomplete="off" enterkeyhint="search"
-           role="combobox" aria-expanded="false" aria-controls="search-dropdown" aria-autocomplete="list">
-    <button type="button" id="search-clear" class="icon-btn search-clear" aria-label="Clear search" hidden>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-    </button>
-    <div id="search-dropdown" role="listbox" aria-label="Search results"></div>
-  </div>
-
-  <div id="add-movie-overlay" class="modal-overlay">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-movie-title">
-      <div class="modal-header">
-        <h2 id="add-movie-title">Add movie</h2>
-        <button id="add-movie-close-btn" type="button" class="icon-btn" aria-label="Cancel">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        </button>
-      </div>
-      <p id="add-movie-warning" class="notice" style="display:none;"></p>
-      <div class="field">
-        <span class="field-label">Formats to watch for</span>
-        <div id="add-movie-formats" class="chips">
-          {% for fmt in all_formats %}
-          <label class="chip"><input type="checkbox" class="add-movie-format" value="{{ fmt }}"> {{ fmt }}</label>
-          {% endfor %}
-        </div>
-        <p class="hint">Only showtimes in the selected formats trigger a notification.</p>
-      </div>
-      <p id="add-movie-error" class="hint error" style="display:none;"></p>
-      <div class="modal-actions">
-        <button id="add-movie-confirm-btn" type="button" class="btn btn-primary-wide">Add movie</button>
-      </div>
+  <div class="index-head">
+    <div class="search">
+      <label for="movie-search" class="visually-hidden">Add a movie to monitor</label>
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="movie-search" placeholder="Add a movie to monitor" autocomplete="off" enterkeyhint="search"
+             role="combobox" aria-expanded="false" aria-controls="search-dropdown" aria-autocomplete="list"
+             data-url="{{ url_for('api_search') }}">
+      <button type="button" id="search-clear" class="icon-btn search-clear" aria-label="Clear search" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+      <div id="search-dropdown" role="listbox" aria-label="Search results"></div>
     </div>
-  </div>
 
-  <div class="list-head">
-    <h1>Monitoring</h1>
-    {% if movies %}<span class="count">{{ movies | length }} movie{{ 's' if movies | length != 1 else '' }}</span>{% endif %}
+    <div class="list-head">
+      <h1>Monitoring</h1>
+      {% if movies %}<span class="count">{{ movies | length }} movie{{ 's' if movies | length != 1 else '' }}</span>{% endif %}
+    </div>
   </div>
 
   {% if movies %}
   <ul class="films">
     {% for m in movies %}
-    {% set tier = {'good': 'good', 'fair': 'fair', 'low': 'low', 'sold-out': 'sold', 'none': 'none'}[m.status_tier] %}
+    {% set tier = m.status_tier %}
     <li>
-      <a class="film" href="{{ url_for('movie_detail', movie_id=m.id) }}" data-movie-id="{{ m.id }}">
+      <article class="film{% if m.new_count or m.freed_seats %} changed{% endif %}" data-movie-id="{{ m.id }}">
         {% if m.poster_url %}
           <img class="film-poster" src="{{ m.poster_url | replace('/w342/', '/w185/') }}" alt="" width="76" height="114" loading="lazy" decoding="async">
         {% else %}
           <div class="film-poster-ph" aria-hidden="true">{{ m.title }}</div>
         {% endif %}
         <div class="film-body">
-          <span class="film-title">{{ m.title }}</span>
+          {# The link covers the whole card (.film-link::after); the Book
+             buttons on the desktop board sit above it. #}
+          <h2 class="film-title"><a class="film-link" href="{{ url_for('movie_detail', movie_id=m.id) }}">{{ m.title }}</a></h2>
           <div class="film-status">
             {% if m.showtime_count == 0 %}
-              <span class="summary">No showtimes yet</span>
+              <span class="film-headline">No showtimes yet</span>
             {% elif m.open_count == 0 and m.upcoming_count %}
               {{ seats(0, 'none', 'Booking not open yet') }}
-              <span class="summary"><span class="seat-label tier-upcoming">Opens {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}</span>, {{ m.upcoming_count }} showtime{{ 's' if m.upcoming_count != 1 else '' }}</span>
+              <span class="film-headline seat-label tier-upcoming">Opens {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}</span>
             {% elif m.open_count == 0 %}
               {{ seats(0, 'sold', 'Sold out') }}
-              <span class="summary">Sold out, {{ m.showtime_count }} showtime{{ 's' if m.showtime_count != 1 else '' }}</span>
+              <span class="film-headline seat-label tier-sold">Sold out</span>
             {% else %}
               {% if m.best_free_seats is not none %}
                 {% set best_label = m.best_free_seats ~ (' free in your area' if m.best_in_areas else ' free') %}
               {% else %}
                 {% set best_label = ((m.best_availability * 100) | round | int) ~ '% free' %}
               {% endif %}
-              {{ seats(m.best_availability, tier, 'Best showtime: ' ~ best_label) }}
-              <span class="summary"><span class="seat-label tier-{{ tier }}">{{ best_label }}</span> at best, {{ m.open_count }} on sale{% if m.upcoming_count %}, {{ m.upcoming_count }} more from {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}{% endif %}</span>
+              {{ seats(m.best_lit, tier, 'Best showtime: ' ~ best_label) }}
+              <span class="film-headline seat-label tier-{{ tier }}">{{ best_label }}</span>
             {% endif %}
+          </div>
+          {% if m.showtime_count %}
+          <p class="film-summary">
+            {% if m.open_count %}
+              Best of {{ m.open_count }} showtime{{ 's' if m.open_count != 1 }} on sale.
+              {% if m.upcoming_count %}{{ m.upcoming_count }} more open {{ m.next_sale_start.strftime('%a %-d %b, %H:%M') }}.{% endif %}
+            {% elif m.upcoming_count %}
+              {{ m.upcoming_count }} showtime{{ 's' if m.upcoming_count != 1 }}, booking not open yet.
+            {% else %}
+              {{ m.showtime_count }} showtime{{ 's' if m.showtime_count != 1 }}, all sold out.
+            {% endif %}
+          </p>
+          {% endif %}
+          {% if m.new_count or m.freed_seats %}
+          <div class="film-badges">
             {% if m.new_count %}<span class="badge-new">{{ m.new_count }} new</span>{% endif %}
             {% if m.freed_seats %}<span class="badge-freed" title="Freed up in the last 24 hours and still free">+{{ m.freed_seats }} seat{{ 's' if m.freed_seats != 1 else '' }} freed</span>{% endif %}
           </div>
+          {% endif %}
           <div class="film-meta">
             {% if m.check_interval_seconds is none %}
-              <span>Checking off</span>
+              <span class="meta-off">Checking off</span>
             {% else %}
-              <span>{{ interval_labels.get(m.check_interval_seconds, 'Every ' ~ m.check_interval_seconds ~ ' s') }}</span>
+              <span class="meta-extra">{{ interval_labels.get(m.check_interval_seconds, 'Every ' ~ m.check_interval_seconds ~ ' s') }}</span>
             {% endif %}
             {% if m.last_checked_at %}<span>Checked <time class="rel-time" datetime="{{ m.last_checked_at }}">{{ m.last_checked_at | relativedate }}</time></span>{% endif %}
-            {% if m.required_formats %}<span>{{ m.required_formats | join(', ') }}</span>{% endif %}
+            {% if m.required_formats %}<span class="meta-extra">{{ m.required_formats | join(', ') }}</span>{% endif %}
           </div>
         </div>
-      </a>
+
+        {# Desktop board (from 1200 px): the next two weeks and the next
+           showtimes on sale. #}
+        <div class="film-plan">
+          {{ heat_strip(m.days) }}
+          {% if m.next_shows %}
+          <ul class="next-shows" aria-label="Next showtimes on sale">
+            {% for s in m.next_shows %}
+            <li class="next-show">
+              <span class="next-when"><span class="show-date">{{ s.start_time | when('%a %-d %b') }}</span>{{ s.start_time | when('%H:%M') }}</span>
+              <span class="seat-label tier-{{ s.tier }}">{{ s.seat_text }}</span>
+              {% if s.booking_link %}<a class="btn btn-small" href="{{ s.booking_link }}" target="_blank" rel="noopener" aria-label="Book {{ m.title }}, {{ s.start_time | when('%A %-d %B, %H:%M') }}">Book</a>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="next-none">{{ 'Booking not open yet.' if m.upcoming_count else 'Nothing on sale.' }}</p>
+          {% endif %}
+        </div>
+      </article>
     </li>
     {% endfor %}
   </ul>
@@ -101,269 +117,39 @@
   {% endif %}
 {% endblock %}
 
+{% block sheets %}
+  <div id="add-movie-overlay" class="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-movie-title" tabindex="-1">
+      <div class="modal-header">
+        <h2 id="add-movie-title">Add movie</h2>
+        <button type="button" class="icon-btn" data-sheet-close aria-label="Cancel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p id="add-movie-warning" class="notice" hidden></p>
+      <div class="field">
+        <span class="field-label">Formats to watch for</span>
+        <div id="add-movie-formats" class="chips">
+          {% for fmt in all_formats %}
+          <label class="chip"><input type="checkbox" class="add-movie-format" value="{{ fmt }}"> {{ fmt }}</label>
+          {% endfor %}
+        </div>
+        <p class="hint">Only showtimes in the selected formats trigger a notification. Your last choice is preselected.</p>
+      </div>
+      <p id="add-movie-error" class="hint error" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button id="add-movie-confirm-btn" type="button" class="btn btn-primary-wide" data-url="{{ url_for('add_movie') }}">Add movie</button>
+      </div>
+    </div>
+  </div>
+  {% if show_tour %}{% include "_tour.html" %}{% endif %}
+{% endblock %}
+
 {% block scripts %}
-<script>
-const searchInput = document.getElementById('movie-search');
-const searchClearBtn = document.getElementById('search-clear');
-const dropdown = document.getElementById('search-dropdown');
-let debounceTimer = null;
-let searchSeq = 0;
-let currentResults = [];
-let activeIndex = -1;
-
-// Movies already being monitored (by TMDb id), so the search dropdown and
-// add-movie dialog can flag a re-add before it happens - re-adding silently
-// resets that movie's check interval, formats, and history (storage.add_movie
-// overwrites by id).
-const EXISTING_TMDB_IDS = new Set({{ existing_tmdb_ids | tojson }});
-
-// --- Add-movie dialog: opened when a search result is picked, lets the
-// user choose which formats to check for before the movie is actually
-// added. Formats default to all-checked, since leaving them unchecked
-// means the movie will silently never match any showtimes. ---
-const addMovieOverlay = document.getElementById('add-movie-overlay');
-const addMovieTitle = document.getElementById('add-movie-title');
-const addMovieWarning = document.getElementById('add-movie-warning');
-const addMovieCloseBtn = document.getElementById('add-movie-close-btn');
-const addMovieConfirmBtn = document.getElementById('add-movie-confirm-btn');
-const addMovieError = document.getElementById('add-movie-error');
-const addMovieFormatCheckboxes = Array.from(document.querySelectorAll('.add-movie-format'));
-let pendingMovie = null;
-
-function openAddDialog(result) {
-  pendingMovie = result;
-  addMovieTitle.textContent = result.year ? `${result.title} (${result.year})` : result.title;
-  for (const cb of addMovieFormatCheckboxes) cb.checked = true;
-  addMovieError.style.display = 'none';
-  const alreadyAdded = EXISTING_TMDB_IDS.has(result.tmdb_id);
-  addMovieWarning.textContent = alreadyAdded
-    ? "You already monitor this movie. Adding it again resets its check frequency, formats and history."
-    : '';
-  addMovieWarning.style.display = alreadyAdded ? '' : 'none';
-  addMovieConfirmBtn.textContent = alreadyAdded ? 'Add again' : 'Add movie';
-  addMovieConfirmBtn.disabled = false;
-  closeDropdown();
-  openSheet(addMovieOverlay);
-}
-
-function closeAddDialog() {
-  pendingMovie = null;
-  addMovieOverlay.classList.remove('open');
-}
-
-addMovieCloseBtn.addEventListener('click', closeAddDialog);
-addMovieOverlay.addEventListener('click', (e) => {
-  if (e.target === addMovieOverlay) closeAddDialog();
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && addMovieOverlay.classList.contains('open')) closeAddDialog();
-});
-addMovieConfirmBtn.addEventListener('click', () => {
-  if (!pendingMovie) return;
-  const formats = addMovieFormatCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
-  addMovie(pendingMovie.tmdb_id, formats);
-});
-
-function openDropdown() {
-  dropdown.classList.add('open');
-  searchInput.setAttribute('aria-expanded', 'true');
-}
-function closeDropdown() {
-  dropdown.classList.remove('open');
-  searchInput.setAttribute('aria-expanded', 'false');
-}
-
-function updateActive() {
-  const rows = dropdown.querySelectorAll('.search-row');
-  rows.forEach((row, i) => {
-    const isActive = i === activeIndex;
-    row.classList.toggle('active', isActive);
-    row.setAttribute('aria-selected', String(isActive));
-    if (isActive) row.scrollIntoView({ block: 'nearest' });
-  });
-}
-
-function renderResults(results) {
-  currentResults = results;
-  activeIndex = -1;
-  dropdown.replaceChildren();
-  if (results.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'search-empty';
-    empty.textContent = 'No movies found. Check the spelling or try the original title.';
-    dropdown.appendChild(empty);
-  } else {
-    for (const r of results) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'search-row';
-      row.setAttribute('role', 'option');
-      if (r.poster_thumb) {
-        const img = document.createElement('img');
-        img.src = r.poster_thumb; img.alt = ''; img.loading = 'lazy'; img.width = 36; img.height = 54;
-        row.appendChild(img);
-      } else {
-        const ph = document.createElement('span');
-        ph.className = 'thumb-placeholder';
-        row.appendChild(ph);
-      }
-      const meta = document.createElement('span');
-      meta.className = 'meta';
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = r.title;
-      const year = document.createElement('div');
-      year.className = 'year';
-      year.textContent = r.year || '';
-      meta.append(title, year);
-      row.appendChild(meta);
-      if (EXISTING_TMDB_IDS.has(r.tmdb_id)) {
-        const tag = document.createElement('span');
-        tag.className = 'already';
-        tag.textContent = 'Monitored';
-        row.appendChild(tag);
-      }
-      row.addEventListener('click', () => openAddDialog(r));
-      dropdown.appendChild(row);
-    }
-  }
-  openDropdown();
-}
-
-function renderSearchError() {
-  currentResults = [];
-  activeIndex = -1;
-  dropdown.innerHTML = '<div class="search-empty">Search failed. Check the TMDb API key in Settings, then try again.</div>';
-  openDropdown();
-}
-
-async function addMovie(tmdbId, requiredFormats) {
-  addMovieError.style.display = 'none';
-  addMovieConfirmBtn.disabled = true;
-  addMovieConfirmBtn.textContent = 'Adding…';
-  let resp;
-  try {
-    resp = await fetch('{{ url_for("add_movie") }}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmdb_id: tmdbId, required_formats: requiredFormats }),
-    });
-  } catch (e) {
-    resp = null;
-  }
-  if (resp && resp.ok) {
-    const data = await resp.json();
-    try {
-      sessionStorage.setItem('cc-just-added', data.movie.id);
-    } catch (e) { /* storage unavailable (private mode, quota, ...) */ }
-    cxReload({ keepScroll: false });
-    return;
-  }
-  const data = resp ? await resp.json().catch(() => ({})) : {};
-  addMovieError.textContent = resp ? (data.error || 'Could not add the movie. Try again.') : 'Could not reach the server. Check your connection and try again.';
-  addMovieError.style.display = '';
-  addMovieConfirmBtn.disabled = false;
-  addMovieConfirmBtn.textContent = 'Add movie';
-}
-
-function updateSearchClearVisibility() {
-  searchClearBtn.hidden = searchInput.value.length === 0;
-}
-
-searchInput.addEventListener('input', () => {
-  updateSearchClearVisibility();
-  clearTimeout(debounceTimer);
-  const q = searchInput.value.trim();
-  if (!q) {
-    closeDropdown();
-    return;
-  }
-  debounceTimer = setTimeout(async () => {
-    // Drop responses that arrive after a newer search was started, so a
-    // slow early request can't overwrite the results for what's typed now.
-    const seq = ++searchSeq;
-    try {
-      const resp = await fetch('{{ url_for("api_search") }}?q=' + encodeURIComponent(q));
-      if (!resp.ok) throw new Error('search request failed');
-      const results = await resp.json();
-      if (seq === searchSeq) renderResults(results);
-    } catch (e) {
-      if (seq === searchSeq) renderSearchError();
-    }
-  }, 250);
-});
-
-searchClearBtn.addEventListener('click', () => {
-  searchInput.value = '';
-  updateSearchClearVisibility();
-  closeDropdown();
-  searchInput.focus();
-});
-
-searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeDropdown(); return; }
-  if (!dropdown.classList.contains('open') || currentResults.length === 0) return;
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    activeIndex = Math.min(activeIndex + 1, currentResults.length - 1);
-    updateActive();
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    activeIndex = Math.max(activeIndex - 1, -1);
-    updateActive();
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    openAddDialog(currentResults[Math.max(activeIndex, 0)]);
-  }
-});
-
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.search')) closeDropdown();
-});
-
-// The loading shell (shell.html) draws this many placeholder rows.
-try { localStorage.setItem('cx-film-count', String(document.querySelectorAll('.film').length || 1)); } catch (e) {}
-
-// --- "Checked 2 minutes ago" stays current without a reload. ---
-function formatRelative(isoStr) {
-  const seconds = Math.max((Date.now() - new Date(isoStr).getTime()) / 1000, 0);
-  if (seconds < 30) return 'just now';
-  const minutes = Math.floor((seconds + 30) / 60);
-  if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
-  const hours = Math.floor((seconds + 1800) / 3600);
-  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-  const days = Math.floor((seconds + 43200) / 86400);
-  return `${days} day${days !== 1 ? 's' : ''} ago`;
-}
-setInterval(() => {
-  for (const el of document.querySelectorAll('.rel-time')) el.textContent = formatRelative(el.getAttribute('datetime'));
-}, 15000);
-
-// Coming back to the tab (e.g. from an ntfy notification) should show
-// fresh statuses, not whatever was loaded hours ago.
-let hiddenAt = null;
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { hiddenAt = Date.now(); return; }
-  if (hiddenAt && Date.now() - hiddenAt > 60000 && !document.querySelector('.modal-overlay.open')) cxReload();
-});
-
-// --- Acknowledge a just-added movie with a brief highlight: addMovie()
-// stashes the new id before reloading, so it survives the reload. ---
-(function highlightJustAdded() {
-  let justAddedId;
-  try {
-    justAddedId = sessionStorage.getItem('cc-just-added');
-    sessionStorage.removeItem('cc-just-added');
-  } catch (e) {
-    return;
-  }
-  if (!justAddedId) return;
-  const row = document.querySelector(`.film[data-movie-id="${CSS.escape(justAddedId)}"]`);
-  if (!row) return;
-  row.scrollIntoView({ block: 'center' });
-  row.classList.add('just-added');
-  row.addEventListener('animationend', () => row.classList.remove('just-added'), { once: true });
-})();
-</script>
-{% if show_tour %}{% include "_tour.html" %}{% endif %}
+<script type="application/json" id="index-data">{{ {'existing_tmdb_ids': existing_tmdb_ids} | tojson }}</script>
+<script src="{{ asset('index.js') }}"></script>
+{% if show_tour %}
+<script src="{{ asset('showtimes.js') }}"></script>
+<script src="{{ asset('tour.js') }}"></script>
+{% endif %}
 {% endblock %}

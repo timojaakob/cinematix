@@ -44,7 +44,7 @@ def test_setup_validation(client):
     assert resp.status_code == 200
     for message in ("Choose a cinema.", "Enter a TMDb API key.", "Enter an http(s) URL.", "at least 8"):
         assert message in html
-    assert "let current = 0" in html
+    assert 'data-first-step="0"' in html
     assert not storage.is_set_up(storage.load_config())
 
 
@@ -177,7 +177,8 @@ def test_movie_matches_api(client):
     storage.save_results([{"event_id": "1", "movie_id": "m"}, {"event_id": "2", "movie_id": "other"}])
     storage.save_state({"notified_event_ids": [], "last_checked": {"m": "2026-10-21T13:00:00"}})
     data = client.get("/api/movies/m/matches").get_json()
-    assert data == {"updated_at": "2026-10-21T13:00:00", "matches": [{"event_id": "1", "movie_id": "m"}]}
+    assert data["updated_at"] == "2026-10-21T13:00:00"
+    assert [(m["event_id"], m["tier"], m["seat_text"]) for m in data["matches"]] == [("1", "none", "Seats unknown")]
     assert client.get("/api/movies/nope/matches").status_code == 404
     assert webui.app.test_client().get("/api/movies/m/matches").status_code == 401
 
@@ -277,3 +278,39 @@ def test_tour_opens_once_and_on_request(client):
     client.post("/settings/tour-seen", headers=SAME_ORIGIN)
     assert 'id="tour-overlay"' not in client.get("/").get_data(as_text=True)
     assert 'id="tour-overlay"' in client.get("/?tour=1").get_data(as_text=True)
+
+
+NOW = webui.datetime(2026, 10, 26, 12, 0)
+
+
+def view(**match):
+    return webui.showtime_view({"event_id": "1", "start_time": "2026-10-30T20:00:00", **match}, NOW)
+
+
+def test_showtime_view_rules():
+    """The one place for tiers and seat text: the pages draw from these."""
+    v = view(availability=0.6, seat_ratio=0.3, free_seats=38, capacity=128, in_areas=True)
+    assert (v["tier"], v["lit"], v["seat_text"]) == ("fair", 6, "38 of 128 in your area")
+    assert view(availability=0.004)["tier"] == "sold" and view(availability=0.004)["seat_text"] == "Sold out"
+    assert view(availability=0.5, seat_ratio=0.0)["tier"] == "sold"  # nothing free in your areas
+    assert view(availability=0.01)["lit"] == 1  # one seat lit while any is free
+    upcoming = view(availability=0.0, sale_start="2026-10-31T10:15:00")
+    assert (upcoming["tier"], upcoming["sold"], upcoming["seat_text"]) == ("upcoming", False, "Opens Sat 31 Oct, 10:15")
+    fresh = view(availability=0.8, fetched_at="2026-10-26T09:00:00", freed_seats=3)
+    assert fresh["is_new"] and fresh["freed"] == 3 and fresh["changed"]
+    assert not view(availability=0.0, sold_out=True, fetched_at="2026-10-26T09:00:00", freed_seats=3)["changed"]
+
+
+def test_movie_list_puts_changed_movies_first(client):
+    finish_setup(client)
+    cfg = storage.load_config()
+    cfg["movies"] = [{"id": i, "title": t, "query": t.lower(), "check_interval_seconds": 120, "required_formats": ["IMAX"]}
+                     for i, t in (("a", "Quiet Movie"), ("b", "Busy Movie"))]
+    storage.save_config(cfg)
+    storage.save_results([
+        {"event_id": "1", "movie_id": "a", "availability": 0.5, "start_time": "2026-12-19T17:20:00"},
+        {"event_id": "2", "movie_id": "b", "availability": 0.5, "start_time": "2026-12-19T17:20:00", "freed_seats": 2},
+    ])
+    html = client.get("/").get_data(as_text=True)
+    assert html.index("Busy Movie") < html.index("Quiet Movie")
+    assert "Best of 1 showtime on sale." in html

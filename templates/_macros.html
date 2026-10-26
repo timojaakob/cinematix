@@ -1,8 +1,22 @@
-{# Seat strip: 20 seat-backs, the lit ones are free seats. Kept in sync with
-   seatStrip() in movie.html, which draws the same thing client-side. #}
-{% macro seats(fraction, tier, label) -%}
-{%- set lit = 0 if fraction is none else ([(fraction * 20) | round | int, 1] | max if fraction >= 0.005 else 0) -%}
+{# Seat strip: 20 seat-backs, the lit ones are free seats. lit comes from
+   the server (webui.lit_seats); seatStrip() in static/showtimes.js draws
+   the same thing client-side. #}
+{% macro seats(lit, tier, label) -%}
 <span class="seats {{ tier }}" role="img" aria-label="{{ label }}">
   {%- for i in range(20) %}<i{% if i < lit %} class="on"{% endif %}></i>{% endfor -%}
 </span>
+{%- endmacro %}
+
+{# The next two weeks of a movie, one light per day (webui.movie_card). #}
+{% macro heat_strip(days) -%}
+{% set words = {'good': '50% free or more', 'fair': '15 to 50% free', 'low': 'under 15% free', 'sold': 'sold out', 'upcoming': 'booking not open yet', 'none': 'seats unknown'} %}
+<ol class="heat" aria-label="Next 14 days">
+  {%- for d in days %}
+  <li class="heat-day{% if d.tier == 'empty' %} empty{% endif %}" title="{{ d.label }}{% if d.count %}: {{ d.count }} showtime{{ 's' if d.count != 1 }}, {{ words[d.tier] }}{% endif %}">
+    <span class="heat-num">{{ d.label.split(' ')[1] }}</span>
+    <i class="tier-bar {{ d.tier }}"></i>
+    <span class="visually-hidden">{{ d.label }}: {% if d.count %}{{ d.count }} showtime{{ 's' if d.count != 1 }}, best {{ words[d.tier] }}{% else %}no showtimes{% endif %}</span>
+  </li>
+  {%- endfor %}
+</ol>
 {%- endmacro %}

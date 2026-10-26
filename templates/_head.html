@@ -12,10 +12,18 @@
 <link rel="preload" href="{{ asset('elms-sans-latin.woff2') }}" as="font" type="font/woff2" crossorigin>
 <script>
 // Resolve the theme before first paint so there's no flash of the wrong
-// mode: an explicit choice from the settings switch wins, otherwise fall
-// back to the OS-level preference.
+// mode: a choice made in the settings wins, otherwise ("Auto") the OS-level
+// preference. The key was 'cinemacity-theme' before 1.0.
 (function () {
-  var stored = localStorage.getItem('cinemacity-theme');
+  var stored = null;
+  try {
+    stored = localStorage.getItem('cx-theme');
+    var old = localStorage.getItem('cinemacity-theme');
+    if (old !== null) {
+      if (stored === null && (old === 'light' || old === 'dark')) localStorage.setItem('cx-theme', stored = old);
+      localStorage.removeItem('cinemacity-theme');
+    }
+  } catch (e) { /* storage unavailable */ }
   var theme = (stored === 'light' || stored === 'dark')
     ? stored
     : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');

@@ -19,7 +19,20 @@ First release that is set up fully in the web UI.
 - Optional password login, and a same-origin check on every form, so other websites can't change settings.
 - Prebuilt image for amd64 and arm64, a `docker-compose.yml`, a health check, and tests with fixtures captured from the live APIs.
 
+- A movie page lists the new showtimes and freed seats of the last 24 hours at the top. A push about several showtimes of one movie opens that page.
+- A row of dates above the showtime list jumps to a day.
+- On wide screens (from 1200 px), the movie list shows each movie's next two weeks and next showtimes with **Book**, and the seat map stays open next to a movie's showtimes.
+- The seat map can zoom to your seating areas (the default on phones), says what the seat under the pointer is, and its areas can be drawn by dragging with a mouse or with the keyboard.
+- Theme choice "Auto", which follows the system setting.
+
 ### Changed
+- The movie page on phones starts with a compact header; the movie's details fold away under **About this movie**.
+- Movies with new showtimes or freed seats come first in the movie list.
+- Filters open as a bottom sheet on phones and as a panel with the fields side by side on larger screens. Start times are chosen in 24-hour form.
+- The calendar shows five weeks from this week, with the number of showtimes per day.
+- The three seat lights also differ in shape (a long, middle or short bar), and "booking not open yet" is violet instead of orange. Status colours in the light theme meet WCAG contrast.
+- Dialogs keep keyboard focus inside, return it to the button that opened them, and keep their save button in view.
+- The settings dialog is grouped into sections, two columns wide on large screens.
 - Settings that were env vars (`CINEMA_ID`, `TMDB_API_KEY`, `NTFY_TOPIC`, `NTFY_URL`, `WEBUI_URL`) are now set in the web UI. `MOVIE_QUERY`, `REQUIRE_IMAX`, `SITE_ID`, `LANG_CODE`, `POLL_INTERVAL_SECONDS` and the `IMAX_*` and file path variables are gone; `DATA_DIR` replaces the file paths.
 - Times are compared in Prague time by the app itself, so the container no longer needs `TZ=Europe/Prague`.
 - The app runs as a non-root user (`PUID`/`PGID`, default 1000) and is served by waitress instead of Flask's development server.

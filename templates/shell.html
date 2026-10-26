@@ -20,7 +20,7 @@
 <span class="seats sk-seats" aria-hidden="true">{% for i in range(20) %}<i style="--i:{{ i }}"></i>{% endfor %}</span>
 {%- endmacro %}
 
-<main class="wrap" aria-busy="true">
+<main class="wrap wide" aria-busy="true">
   <p class="visually-hidden" role="status">Loading</p>
   <div class="sk-message" id="sk-message" hidden>
     <strong id="sk-message-title"></strong>
@@ -29,8 +29,10 @@
   </div>
 
   <div class="sk sk-index" aria-hidden="true">
-    <div class="sk-block sk-search"></div>
-    <div class="list-head"><div class="sk-block sk-h1"></div></div>
+    <div class="index-head">
+      <div class="search"><div class="sk-block sk-search"></div></div>
+      <div class="list-head"><div class="sk-block sk-h1"></div></div>
+    </div>
     <ul class="films">
       {% for w in [62, 48, 70, 55] %}
       <li>
@@ -55,12 +57,12 @@
           <div class="sk-block movie-poster"></div>
           <div>
             <div class="sk-block sk-line sk-h1" style="width: 80%"></div>
-            <div class="sk-block sk-line sk-h1" style="width: 50%"></div>
-            <div class="sk-block sk-line sk-small" style="width: 70%"></div>
-            <div class="sk-block sk-line sk-small" style="width: 85%"></div>
+            <div class="sk-block sk-line sk-small" style="width: 50%"></div>
           </div>
         </div>
-        <div class="overview">
+        <div class="sk-block sk-line sk-summary"></div>
+        <div class="overview sk-about-body">
+          <div class="sk-block sk-line sk-small" style="width: 85%"></div>
           <div class="sk-block sk-line" style="width: 100%"></div>
           <div class="sk-block sk-line" style="width: 94%"></div>
           <div class="sk-block sk-line" style="width: 60%"></div>
@@ -84,6 +86,7 @@
           {% endfor %}
         </div>
       </div>
+      <div class="seatmap-panel"><div class="sk-block sk-h2"></div><div class="sk-block sk-line" style="width: 70%"></div></div>
     </div>
   </div>
 </main>

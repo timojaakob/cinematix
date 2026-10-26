@@ -65,7 +65,7 @@ The wizard opens on the first visit and has four steps. Everything can be change
 
 1. **Cinema.** Choose one of the Cinema City cinemas in Czechia.
 2. **TMDb.** cinematix uses [The Movie Database](https://www.themoviedb.org) for movie search and posters. A key is free: create an account, open [Settings → API](https://www.themoviedb.org/settings/api), and copy the "API Key" or the "API Read Access Token". The **Check** button tests the key.
-3. **Notifications.** cinematix sends pushes through [ntfy](https://ntfy.sh), a free app for Android and iPhone. The wizard creates a private topic name for you. Install the ntfy app, subscribe to that topic, and tap **Send test**. Anyone who knows the topic name can read it, so keep it private. A self-hosted ntfy server works too.
+3. **Alerts.** cinematix sends pushes through [ntfy](https://ntfy.sh), a free app for Android and iPhone. The wizard creates a private topic name for you. Install the ntfy app and subscribe to that topic: scan the QR code on a computer, or use **Open the topic in ntfy** on the phone. Then use **Send test**. Anyone who knows the topic name can read it, so keep it private. A self-hosted ntfy server works too. This step also asks for the address of the app, which a push opens.
 4. **Password (optional).** Set a password if other people can reach the server. Leave it empty if the server is only on your home network, or if a reverse proxy already asks for a login.
 
 Then search for a movie, choose the formats you want (IMAX, 4DX, Superscreen, VIP, 3D, 2D), and cinematix starts checking.
@@ -74,7 +74,9 @@ After setup, a short tour explains showtimes, the seat map, seating areas and th
 
 ## Freed seats
 
-Each showtime shows its free seats inside your seating areas, for example "13 of 144 in your area" (in a hall without areas: "59 of 379 free"). The seat strip, its colour, the filters, the sorting and the movie cards use the same count. Wheelchair spaces are shown in blue on the seat map and never counted. Tap the count to open the seat map. It shows which seats are free, which were freed in the last 24 hours, where your group fits, and your seating areas. Showtimes and movie cards with freed seats get a "+3 freed" badge.
+Each showtime shows its free seats inside your seating areas, for example "13 of 144 in your area" (in a hall without areas: "59 of 379 free"). The seat strip, its colour, the filters, the sorting and the movie cards use the same count. Wheelchair spaces are shown in blue on the seat map and never counted. Tap the count to open the seat map. It shows which seats are free, which were freed in the last 24 hours, where your group fits, and your seating areas. On a phone it starts zoomed to your areas; **Whole hall** shows everything. On a screen at least 1200 px wide, the seat map stays open next to the showtimes and follows the one you select. Showtimes and movie cards with freed seats get a "+3 freed" badge.
+
+New showtimes and freed seats of the last 24 hours are also listed at the top of the movie page, under **Changed in the last 24 hours**, and movies with such changes come first in the movie list.
 
 ### Seating areas
 
@@ -83,10 +85,12 @@ Each hall can have a **preferred** area and an **acceptable** area, drawn as gre
 To change the areas of a hall:
 
 1. Open the seat map of any showtime in that hall.
-2. Tap **Edit seating areas**.
-3. Tap two opposite corner seats of the preferred area. Tap **Skip** to leave it out.
-4. Tap two opposite corner seats of the acceptable area, or tap **Skip**.
-5. Tap **Save areas**.
+2. Select **Edit seating areas**.
+3. Select two opposite corner seats of the preferred area. With a mouse, you can also drag from one corner to the other. Select **Skip** to leave the area out.
+4. Select two opposite corner seats of the acceptable area, or select **Skip**.
+5. Select **Save areas**.
+
+With a keyboard, the arrow keys move between seats and Enter or Space selects a corner.
 
 **No areas** removes both areas, so every seat counts.
 
@@ -113,7 +117,7 @@ Then:
 - **Android (Chrome):** open the menu and tap **Add to Home screen**.
 - **iPhone (Safari):** tap **Share**, then **Add to Home Screen**.
 
-Afterwards, enter the HTTPS address under **Settings → Address of this app**. A notification about several showtimes opens this address.
+Afterwards, enter the HTTPS address under **Settings → Address of this app**. A notification about one showtime opens its booking page. A notification about several showtimes of one movie opens that movie's page at this address, with the changes on top. A notification about several movies opens the movie list.
 
 ## Advanced settings
 

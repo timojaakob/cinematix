@@ -11,7 +11,9 @@
   <li data-step-dot="3">Password</li>
 </ol>
 
-<form id="setup-form" method="post" action="{{ url_for('setup') }}" class="plain-form" novalidate>
+<form id="setup-form" method="post" action="{{ url_for('setup') }}" class="plain-form" novalidate
+      data-first-step="{{ first_step }}" data-check-tmdb-url="{{ url_for('setup_check_tmdb') }}"
+      data-test-url="{{ url_for('test_notification') }}" data-qr-url="{{ url_for('setup_qr') }}">
 
   <section class="step" data-step="0">
     <h2>1. Choose your cinema</h2>
@@ -51,14 +53,16 @@
   </section>
 
   <section class="step" data-step="2">
-    <h2>3. Get notifications</h2>
+    <h2>3. Set up alerts</h2>
     <p class="hint">cinematix sends push notifications through <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>, a free app for Android and iPhone. A private topic was made for you:</p>
     <ol class="hint how-to">
       <li>Install the ntfy app on your phone.</li>
-      <li>In the app, tap <b>+</b> and enter the topic name <code id="ntfy-topic-name"></code>. Or scan the code to open the topic in the phone's browser.</li>
-      <li>Tap <b>Send test</b> and check that the notification arrives.</li>
+      <li class="on-desktop">In the app, tap <b>+</b> and enter the topic name <code class="ntfy-topic-name"></code>. Or scan the code to open the topic in the phone's browser.</li>
+      <li class="on-phone">Open the topic with the button below, or in the app tap <b>+</b> and enter the topic name <code class="ntfy-topic-name"></code>.</li>
+      <li>Send a test and check that the notification arrives.</li>
     </ol>
-    <img id="ntfy-qr" class="qr" alt="QR code for the ntfy topic" width="180" height="180">
+    <img id="ntfy-qr" class="qr on-desktop" alt="QR code for the ntfy topic" width="180" height="180">
+    <a id="ntfy-open" class="btn btn-quiet on-phone open-topic" target="_blank" rel="noopener">Open the topic in ntfy</a>
     <div class="field">
       <label class="field-label" for="ntfy_endpoint">ntfy topic URL</label>
       <div class="inline-input">
@@ -67,6 +71,11 @@
       </div>
       <p id="ntfy-status" class="hint{% if errors.ntfy_endpoint %} error{% endif %}" role="status">{{ errors.ntfy_endpoint or '' }}</p>
       <p class="hint">Anyone who knows the topic name can read it, so keep it private. A self-hosted ntfy server works too: enter its topic URL.</p>
+    </div>
+    <div class="field">
+      <label class="field-label" for="public_url">Address of this app</label>
+      <input type="text" id="public_url" name="public_url" value="{{ public_url }}" autocomplete="off" spellcheck="false" inputmode="url">
+      <p class="hint">A notification about one movie opens its page at this address. Change it if you open cinematix through another address, for example a domain.</p>
     </div>
   </section>
 
@@ -82,11 +91,6 @@
       {% if errors.password %}<p class="hint error" role="alert">{{ errors.password }}</p>{% endif %}
       <p class="hint">Leave both empty if only you can reach this server, or if a reverse proxy already asks for a login.</p>
     </div>
-    <div class="field">
-      <label class="field-label" for="public_url">Address of this app</label>
-      <input type="text" id="public_url" name="public_url" value="{{ public_url }}" autocomplete="off" spellcheck="false" inputmode="url">
-      <p class="hint">Tapping a notification about several showtimes opens this address. Change it if you open cinematix through another address, for example a domain.</p>
-    </div>
   </section>
 
   <div class="step-actions">
@@ -98,99 +102,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-(function () {
-  const steps = Array.from(document.querySelectorAll('.step'));
-  const dots = Array.from(document.querySelectorAll('[data-step-dot]'));
-  const back = document.getElementById('step-back');
-  const next = document.getElementById('step-next');
-  const finish = document.getElementById('step-finish');
-  let current = {{ first_step }};
-
-  // Without JS every step stays visible and the form still works.
-  document.documentElement.classList.add('steps-js');
-  function show(i) {
-    current = i;
-    steps.forEach((s, n) => { s.hidden = n !== i; });
-    dots.forEach((d, n) => {
-      d.classList.toggle('done', n < i);
-      d.classList.toggle('active', n === i);
-      if (n === i) d.setAttribute('aria-current', 'step'); else d.removeAttribute('aria-current');
-    });
-    back.hidden = i === 0;
-    next.hidden = i === steps.length - 1;
-    finish.hidden = i !== steps.length - 1;
-    const first = steps[i].querySelector('select, input');
-    if (first) first.focus({ preventScroll: true });
-    window.scrollTo({ top: 0 });
-  }
-
-  // Each step checks only what the server would reject anyway, so a
-  // mistake shows up before the last step.
-  const cinema = document.getElementById('cinema_id');
-  const tmdbKey = document.getElementById('tmdb_api_key');
-  const tmdbStatus = document.getElementById('tmdb-status');
-  const ntfy = document.getElementById('ntfy_endpoint');
-  const ntfyStatus = document.getElementById('ntfy-status');
-  function status(el, text, ok) {
-    el.textContent = text;
-    el.className = 'hint ' + (ok ? 'success' : 'error');
-  }
-  function validStep(i) {
-    if (i === 0 && (!cinema || !cinema.value)) { status(document.getElementById('cinema-status'), 'Choose a cinema.', false); return false; }
-    if (i === 1 && !tmdbKey.value.trim()) { status(tmdbStatus, 'Enter a TMDb API key.', false); return false; }
-    if (i === 2 && !/^https?:\/\/[^/]+/.test(ntfy.value.trim())) { status(ntfyStatus, 'Enter an http(s) URL.', false); return false; }
-    return true;
-  }
-  next.addEventListener('click', () => { if (validStep(current)) show(current + 1); });
-  back.addEventListener('click', () => show(current - 1));
-
-  async function postJson(url, body) {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return resp.json();
-  }
-
-  const tmdbBtn = document.getElementById('tmdb-check-btn');
-  tmdbBtn.addEventListener('click', async () => {
-    tmdbBtn.disabled = true;
-    try {
-      const data = await postJson('{{ url_for("setup_check_tmdb") }}', { key: tmdbKey.value });
-      status(tmdbStatus, data.ok ? 'The key works.' : data.error, data.ok);
-    } catch (e) {
-      status(tmdbStatus, 'Could not reach the server.', false);
-    }
-    tmdbBtn.disabled = false;
-  });
-
-  // The QR code and topic name follow the URL field, so an edited topic
-  // stays in sync.
-  const qr = document.getElementById('ntfy-qr');
-  const topicName = document.getElementById('ntfy-topic-name');
-  function syncTopic() {
-    const url = ntfy.value.trim();
-    topicName.textContent = url.split('/').filter(Boolean).pop() || '';
-    qr.src = '{{ url_for("setup_qr") }}?data=' + encodeURIComponent(url);
-  }
-  ntfy.addEventListener('change', syncTopic);
-  syncTopic();
-
-  const ntfyBtn = document.getElementById('ntfy-test-btn');
-  ntfyBtn.addEventListener('click', async () => {
-    ntfyBtn.disabled = true;
-    try {
-      const data = await postJson('{{ url_for("test_notification") }}', { ntfy_endpoint: ntfy.value });
-      status(ntfyStatus, data.ok ? 'Test notification sent. Check your phone.' : data.error, data.ok);
-    } catch (e) {
-      status(ntfyStatus, 'Could not reach the server.', false);
-    }
-    ntfyBtn.disabled = false;
-  });
-
-  show(current);
-})();
-</script>
+<script src="{{ asset('setup.js') }}"></script>
 {% endblock %}

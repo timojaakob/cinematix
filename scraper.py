@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 import requests
 from flask import Flask, request
@@ -111,6 +112,19 @@ def notify(title: str, message: str, url: str | None, priority: str, settings: d
 
 def public_url(settings: dict) -> str | None:
     return settings.get("public_url") or None
+
+
+def push_link(picks: list[dict], settings: dict) -> str | None:
+    """Where tapping a push goes: a single showtime's booking page, else
+    the movie's page with its changes on top, else (several movies) the
+    movie list, which shows the changed movies first."""
+    if len(picks) == 1 and picks[0].get("booking_link"):
+        return picks[0]["booking_link"]
+    base = public_url(settings)
+    movie_ids = {p.get("movie_id") for p in picks}
+    if base and len(movie_ids) == 1 and None not in movie_ids:
+        return f"{base.rstrip('/')}/movies/{quote(movie_ids.pop(), safe='')}?changed=1"
+    return base
 
 
 def cinema_from(settings: dict) -> dict:
@@ -563,9 +577,7 @@ def push_picks(picks: list[dict], kind: str, settings: dict, now: datetime) -> b
     if not settings.get(enabled_key, True):
         return True
     title, message = summarize_new_showtimes(picks, now) if kind == "new" else summarize_more_seats(picks)
-    # A single showtime opens its booking page straight from the push.
-    url = picks[0]["booking_link"] if len(picks) == 1 else public_url(settings)
-    return notify(title, message, url, settings.get(f"{enabled_key}_priority", "urgent"), settings)
+    return notify(title, message, push_link(picks, settings), settings.get(f"{enabled_key}_priority", "urgent"), settings)
 
 
 # --- Poll cycle ------------------------------------------------------------

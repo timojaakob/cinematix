@@ -1,6 +1,12 @@
 {% extends "_base.html" %}
 
 {% block title %}{{ movie.title }} — cinematix{% endblock %}
+{% block wrap_class %} wide{% endblock %}
+
+{% macro close_icon() %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>{% endmacro %}
+{% macro external_icon() %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>{% endmacro %}
+{% set pick_mode = movie.seat_alerts == 'custom' %}
+{% set times = [] %}{% for h in range(24) %}{% for mm in ['00', '30'] %}{% set _ = times.append('%02d:%s' % (h, mm)) %}{% endfor %}{% endfor %}
 
 {% block content %}
   <a class="back" href="{{ url_for('index') }}">
@@ -16,7 +22,7 @@
         {% else %}
           <div class="movie-poster-ph" aria-hidden="true"></div>
         {% endif %}
-        <div>
+        <div class="movie-head-text">
           <div class="movie-title-row">
             <h1 class="movie-title">{{ movie.title }}</h1>
             <button id="settings-btn" type="button" class="icon-btn" aria-label="Movie settings" aria-haspopup="dialog" aria-controls="settings-overlay">
@@ -31,6 +37,13 @@
             {% if movie.runtime %}<span>{{ movie.runtime }} min</span>{% endif %}
             {% if movie.release_date %}<span>{{ movie.release_date | humandate }}</span>{% endif %}
           </div>
+        </div>
+      </div>
+      {# On phones the details are folded away, so the showtimes start near
+         the top. From 900 px wide they are always open (movie.js). #}
+      <details class="about" id="about">
+        <summary>About this movie</summary>
+        <div class="about-body">
           <p class="movie-watch">
             {% if movie.check_interval_seconds is none %}
               Checking is off.
@@ -39,31 +52,31 @@
             {% endif %}
             {% set wanted = movie.seats_wanted or 1 %}
             Freed seats: {{ 'any seat' if wanted == 1 else wanted ~ ' together' }},
-            {% if movie.seat_alerts == 'custom' %}{% set n_rules = (movie.watch_rules or []) | length %}showtimes from {{ n_rules }} rule{{ 's' if n_rules != 1 else '' }} and the bells{% else %}all showtimes{% endif %}.
+            {% if pick_mode %}{% set n_rules = (movie.watch_rules or []) | length %}showtimes from {{ n_rules }} rule{{ 's' if n_rules != 1 else '' }} and the bells{% else %}all showtimes{% endif %}.
           </p>
+          {% if movie.overview %}
+          <div class="overview clamped" id="overview">
+            <p>{{ movie.overview }}</p>
+            <button type="button" class="link-btn" id="overview-toggle" hidden>Read more</button>
+          </div>
+          {% endif %}
+          {% if movie.tmdb_id or movie.imdb_id %}
+          <div class="ext-links">
+            {% if movie.tmdb_id %}<a href="https://www.themoviedb.org/movie/{{ movie.tmdb_id }}" target="_blank" rel="noopener">TMDb {{ external_icon() }}</a>{% endif %}
+            {% if movie.imdb_id %}<a href="https://www.imdb.com/title/{{ movie.imdb_id }}/" target="_blank" rel="noopener">IMDb {{ external_icon() }}</a>{% endif %}
+          </div>
+          {% endif %}
         </div>
-      </div>
-      {% if movie.overview %}
-      <div class="overview clamped" id="overview">
-        <p>{{ movie.overview }}</p>
-        <button type="button" class="link-btn" id="overview-toggle" hidden>Read more</button>
-      </div>
-      {% endif %}
-      {% if movie.tmdb_id or movie.imdb_id %}
-      <div class="ext-links">
-        {% if movie.tmdb_id %}<a href="https://www.themoviedb.org/movie/{{ movie.tmdb_id }}" target="_blank" rel="noopener">TMDb <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>{% endif %}
-        {% if movie.imdb_id %}<a href="https://www.imdb.com/title/{{ movie.imdb_id }}/" target="_blank" rel="noopener">IMDb <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>{% endif %}
-      </div>
-      {% endif %}
+      </details>
     </aside>
 
     <section class="movie-shows" aria-labelledby="shows-title">
       <div class="shows-head">
         <div>
           <h2 id="shows-title">Showtimes</h2>
-          <div class="checked-line" aria-live="polite">
+          <div class="checked-line">
             <span id="live-dot" class="live-dot{% if movie.check_interval_seconds is none %} idle{% endif %}" aria-hidden="true"></span>
-            <span id="checked-text">{% if updated_at %}Checked <span id="last-checked">{{ updated_at | relativedate }}</span>{% else %}Not checked yet{% endif %}</span>
+            <span id="checked-text">{% if updated_at %}Checked {{ updated_at | relativedate }}{% else %}Not checked yet{% endif %}</span>
           </div>
         </div>
         <button id="check-now-btn" type="button" class="btn btn-quiet">
@@ -71,92 +84,129 @@
           <span id="check-now-label">Check now</span>
         </button>
       </div>
-      <p id="check-now-status" class="hint error" hidden></p>
+      <p id="check-now-status" class="hint error" role="alert" hidden></p>
+      {# Announces a finished check once, instead of every clock tick. #}
+      <p id="shows-announce" class="visually-hidden" role="status"></p>
+
+      {# What a push was about: new showtimes and freed seats of the last 24 hours. #}
+      <section id="changes" class="changes" aria-labelledby="changes-title" hidden>
+        <div class="changes-head">
+          <h3 id="changes-title">Changed in the last 24 hours</h3>
+          <span id="changes-count" class="day-count"></span>
+        </div>
+        <div id="changes-list"></div>
+        <button type="button" id="changes-more" class="link-btn" hidden></button>
+      </section>
 
       <div id="shows-ui"{% if not matches %} hidden{% endif %}>
-      <div class="toolbar">
-        <div class="segmented" role="group" aria-label="Showtimes view">
-          <button type="button" id="view-list-btn" aria-pressed="true">List</button>
-          <button type="button" id="view-calendar-btn" aria-pressed="false">Calendar</button>
-        </div>
-        <span class="spacer"></span>
-        <button id="filters-toggle" type="button" class="btn btn-quiet filters-btn" aria-expanded="false" aria-controls="filters-panel">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
-          Filters
-          <span id="filters-badge" class="filters-count" hidden></span>
-        </button>
-      </div>
-
-      <div id="filters-panel" class="filters-panel">
-        <div class="field" id="sort-field">
-          <span class="field-label">Sort</span>
-          <div class="segmented" role="group" aria-label="Sort showtimes">
-            <button type="button" data-sort="date" aria-pressed="true">By date</button>
-            <button type="button" data-sort="seats" aria-pressed="false">Most free seats</button>
+        <div class="toolbar">
+          <div class="segmented" role="group" aria-label="Showtimes view">
+            <button type="button" id="view-list-btn" aria-pressed="true">List</button>
+            <button type="button" id="view-calendar-btn" aria-pressed="false">Calendar</button>
           </div>
-        </div>
-        <div class="field field-row">
-          <label class="switch">
-            <input type="checkbox" id="filter-low-avail">
-            <span class="switch-track"><span class="switch-thumb"></span></span>
-            <span>Hide showtimes under 30% free</span>
-          </label>
-        </div>
-        <div class="field">
-          <span class="field-label">Starts between</span>
-          <div class="time-range">
-            <input type="time" id="filter-time-from" value="00:00" step="1800" aria-label="Earliest start time">
-            <span aria-hidden="true">and</span>
-            <input type="time" id="filter-time-to" value="23:59" aria-label="Latest start time">
-          </div>
-        </div>
-        <div class="field">
-          <span class="field-label">Days</span>
-          <div class="chips">
-            {% for d, label in [(1, 'Mon'), (2, 'Tue'), (3, 'Wed'), (4, 'Thu'), (5, 'Fri'), (6, 'Sat'), (0, 'Sun')] %}
-            <label class="chip"><input type="checkbox" class="filter-weekday" data-day="{{ d }}" checked> {{ label }}</label>
-            {% endfor %}
-          </div>
-        </div>
-        {# Filled from the showtimes by the script, so a refresh can add values. #}
-        <div class="field" id="audio-field" hidden>
-          <span class="field-label">Audio</span>
-          <div class="chips" id="audio-chips"></div>
-        </div>
-        <div class="field" id="format-field" hidden>
-          <span class="field-label">Format</span>
-          <div class="chips" id="format-chips"></div>
-        </div>
-        <button type="button" id="filters-reset" class="link-btn">Reset filters</button>
-      </div>
-
-      <div id="list-view"></div>
-
-      <div id="calendar-view" hidden>
-        <div class="cal-head">
-          <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous month">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
-          </button>
-          <h3 id="cal-month-label" aria-live="polite"></h3>
-          <button type="button" id="cal-next" class="icon-btn" aria-label="Next month">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          <span class="spacer"></span>
+          <button id="filters-toggle" type="button" class="btn btn-quiet filters-btn" aria-expanded="false" aria-controls="filters-panel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            Filters
+            <span id="filters-badge" class="filters-count" hidden></span>
           </button>
         </div>
-        <div id="calendar-grid" class="cal-grid"></div>
-        <div class="cal-legend" aria-hidden="true">
-          <span><i style="background:var(--good)"></i>50% free or more</span>
-          <span><i style="background:var(--fair)"></i>15–50%</span>
-          <span><i style="background:var(--low)"></i>Under 15%</span>
-          <span><i style="background:var(--sold)"></i>Sold out</span>
-          <span><i style="background:var(--brand)"></i>Booking not open yet</span>
-        </div>
-        <div id="agenda" class="agenda"></div>
-      </div>
+        {% if pick_mode %}
+        <p class="hint bells-hint"><span class="bell-key" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>The bells choose which dates and showtimes send a "seats freed up" push.</p>
+        {% endif %}
 
-      <div id="no-results" class="no-results" hidden>
-        <strong>No showtimes match your filters</strong>
-        <button type="button" class="link-btn" id="no-results-reset">Reset filters</button>
-      </div>
+        {# A bottom sheet on phones, a panel under the toolbar from 760 px. #}
+        <div id="filters-overlay" class="modal-overlay filters-overlay">
+          <div id="filters-panel" class="modal filters-panel" aria-labelledby="filters-title" tabindex="-1">
+            <div class="modal-header sheet-only">
+              <h2 id="filters-title">Filters</h2>
+              <button type="button" class="icon-btn" data-sheet-close aria-label="Close filters">{{ close_icon() }}</button>
+            </div>
+            <div class="filters-fields">
+              <div class="field" id="sort-field">
+                <span class="field-label" id="sort-label">Sort</span>
+                <div class="segmented" role="group" aria-labelledby="sort-label">
+                  <button type="button" data-sort="date" aria-pressed="true">By date</button>
+                  <button type="button" data-sort="seats" aria-pressed="false">Most free seats</button>
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label">Availability</span>
+                <label class="switch">
+                  <input type="checkbox" id="filter-low-avail">
+                  <span class="switch-track"><span class="switch-thumb"></span></span>
+                  <span>Hide showtimes under 30% free</span>
+                </label>
+              </div>
+              <div class="field">
+                <span class="field-label">Starts between</span>
+                <div class="time-range">
+                  <select id="filter-time-from" aria-label="Earliest start time">
+                    {% for t in times %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                  </select>
+                  <span aria-hidden="true">and</span>
+                  <select id="filter-time-to" aria-label="Latest start time">
+                    {% for t in times[1:] %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                    <option value="23:59" selected>23:59</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label">Days</span>
+                <div class="chips">
+                  {% for d, label in [(1, 'Mon'), (2, 'Tue'), (3, 'Wed'), (4, 'Thu'), (5, 'Fri'), (6, 'Sat'), (0, 'Sun')] %}
+                  <label class="chip"><input type="checkbox" class="filter-weekday" data-day="{{ d }}" checked> {{ label }}</label>
+                  {% endfor %}
+                </div>
+              </div>
+              {# Filled from the showtimes by the script, so a refresh can add values. #}
+              <div class="field" id="audio-field" hidden>
+                <span class="field-label">Audio</span>
+                <div class="chips" id="audio-chips"></div>
+              </div>
+              <div class="field" id="format-field" hidden>
+                <span class="field-label">Format</span>
+                <div class="chips" id="format-chips"></div>
+              </div>
+            </div>
+            <div class="modal-actions filters-actions">
+              <button type="button" id="filters-reset" class="link-btn">Reset filters</button>
+              <button type="button" id="filters-done" class="btn sheet-only" data-sheet-close>Show showtimes</button>
+            </div>
+          </div>
+        </div>
+
+        <nav id="day-jump" class="day-jump" aria-label="Jump to a date"></nav>
+        <div id="list-view"></div>
+
+        <div id="calendar-view" class="calendar-view" hidden>
+          <div class="calendar-month">
+            <div class="cal-head">
+              <button type="button" id="cal-prev" class="icon-btn" aria-label="Earlier weeks">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+              </button>
+              <h3 id="cal-range-label" aria-live="polite"></h3>
+              <button type="button" id="cal-next" class="icon-btn" aria-label="Later weeks">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </button>
+            </div>
+            <div id="calendar-grid" class="cal-grid"></div>
+            <div class="cal-legend" aria-hidden="true">
+              <span><i class="key key-good"></i>50% free or more</span>
+              <span><i class="key key-fair"></i>15–50%</span>
+              <span><i class="key key-low"></i>Under 15%</span>
+              <span><i class="key key-sold"></i>Sold out</span>
+              <span><i class="key key-upcoming"></i>Booking not open yet</span>
+              <span><b class="cal-count-key">3</b>Showtimes that day</span>
+            </div>
+          </div>
+          <div id="agenda" class="agenda"></div>
+        </div>
+
+        <div id="no-results" class="no-results" hidden>
+          <strong>No showtimes match your filters</strong>
+          <button type="button" class="link-btn" id="no-results-reset">Reset filters</button>
+        </div>
       </div>
       <div class="no-results" id="empty-state"{% if matches %} hidden{% endif %}>
         <strong>No showtimes yet</strong>
@@ -167,15 +217,25 @@
         {% endif %}
       </div>
     </section>
-  </div>
 
+    {# From 1200 px wide the seat map sits here next to the list; on smaller
+       screens it opens as a dialog (#seatmap-overlay). movie.js moves
+       #seatmap-view between the two. #}
+    <section id="seatmap-panel" class="seatmap-panel" aria-label="Seat map">
+      <div class="seatmap-panel-empty" id="seatmap-panel-empty">
+        <strong>Seat map</strong>
+        <p>Select a seat count in the list to see the hall, your seating areas and where seats came free.</p>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block sheets %}
   <div id="settings-overlay" class="modal-overlay">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal movie-settings" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" tabindex="-1">
       <div class="modal-header">
         <h2 id="settings-modal-title">{{ movie.title }}</h2>
-        <button id="settings-close-btn" type="button" class="icon-btn" aria-label="Close movie settings">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        </button>
+        <button type="button" class="icon-btn" data-sheet-close aria-label="Close movie settings">{{ close_icon() }}</button>
       </div>
       {% set interval = movie.check_interval_seconds | default(120) %}
       <form id="settings-form" method="post" action="{{ url_for('update_settings', movie_id=movie.id) }}">
@@ -197,22 +257,24 @@
           </div>
           <p class="hint">Only showtimes in the selected formats are tracked.</p>
         </div>
-        <div class="field field-row">
-          <label class="field-label" for="seats_wanted">Seats together</label>
-          <select id="seats_wanted" name="seats_wanted" aria-describedby="seats-wanted-hint">
-            {% for n in range(1, max_party_size + 1) %}
-            <option value="{{ n }}" {% if (movie.seats_wanted or 1) == n %}selected{% endif %}>{{ 'Any seat' if n == 1 else n }}</option>
-            {% endfor %}
-          </select>
+        <div class="field">
+          <div class="field-row">
+            <label class="field-label" for="seats_wanted">Seats together</label>
+            <select id="seats_wanted" name="seats_wanted" aria-describedby="seats-wanted-hint">
+              {% for n in range(1, max_party_size + 1) %}
+              <option value="{{ n }}" {% if (movie.seats_wanted or 1) == n %}selected{% endif %}>{{ 'Any seat' if n == 1 else n }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="hint" id="seats-wanted-hint">A "seats freed up" push needs this many free seats together in your seating areas. Two or three sit in one row; four or more can also sit two rows deep.</p>
         </div>
-        <p class="hint" id="seats-wanted-hint">A "seats freed up" push needs this many free seats together in your seating areas, with at least one of them just freed. Two or three must be in one row. Four or more can also be two rows, one directly behind the other.</p>
         <div class="field">
           <span class="field-label">Freed seats for</span>
           <div class="chips">
-            <label class="chip"><input type="radio" name="seat_alerts" value="all" {% if movie.seat_alerts != 'custom' %}checked{% endif %}> All showtimes</label>
-            <label class="chip"><input type="radio" name="seat_alerts" value="custom" {% if movie.seat_alerts == 'custom' %}checked{% endif %}> Custom</label>
+            <label class="chip"><input type="radio" name="seat_alerts" value="all" {% if not pick_mode %}checked{% endif %}> All showtimes</label>
+            <label class="chip"><input type="radio" name="seat_alerts" value="custom" {% if pick_mode %}checked{% endif %}> Custom</label>
           </div>
-          <div id="watch-rules-section" class="watch-rules"{% if movie.seat_alerts != 'custom' %} hidden{% endif %}>
+          <div id="watch-rules-section" class="watch-rules"{% if not pick_mode %} hidden{% endif %}>
             <p class="hint">Showtimes that match any rule, plus the dates and showtimes you turn on with the bells. A bell can also turn off one showtime that a rule covers.</p>
             <div id="watch-rules"></div>
             <div class="watch-rules-add">
@@ -222,7 +284,7 @@
               <button type="button" class="chip-btn" data-preset="range">Date range</button>
               <button type="button" class="chip-btn" data-preset="custom">Custom rule</button>
             </div>
-            <input type="hidden" name="watch_rules" id="watch-rules-input" value="{{ (movie.watch_rules or []) | tojson | forceescape }}">
+            <input type="hidden" name="watch_rules" id="watch-rules-input" data-track value="{{ (movie.watch_rules or []) | tojson | forceescape }}">
           </div>
         </div>
         <details class="advanced field">
@@ -231,1087 +293,76 @@
           <p class="hint" id="query-hint">cinematix finds this movie by looking for this text in the cinema's listings. Change it only if Cinema City uses a different title.</p>
         </details>
       </form>
-      <div class="modal-actions">
+      <form id="remove-movie-form" method="post" action="{{ url_for('remove_movie', movie_id=movie.id) }}" hidden></form>
+      <div class="modal-actions sheet-footer">
         <button type="button" id="remove-movie-btn" class="btn btn-danger">Stop monitoring</button>
         <button type="button" id="remove-movie-cancel-btn" class="link-btn" hidden>Cancel</button>
-        <form id="remove-movie-form" method="post" action="{{ url_for('remove_movie', movie_id=movie.id) }}" hidden></form>
         <button id="settings-apply-btn" type="submit" form="settings-form" class="btn" disabled>Save changes</button>
       </div>
     </div>
   </div>
 
   <div id="seatmap-overlay" class="modal-overlay">
-    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="seatmap-title">
-      <div class="modal-header">
-        <h2 id="seatmap-title">Seats</h2>
-        <button id="seatmap-close-btn" type="button" class="icon-btn" aria-label="Close seat map">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        </button>
-      </div>
-      <div id="seatmap-stats" class="seatmap-stats" hidden></div>
-      <p id="seatmap-summary" class="seatmap-summary" aria-live="polite"></p>
-      <p id="seatmap-edit-hint" class="seatmap-edit-hint" aria-live="polite" hidden></p>
-      <div id="seatmap" class="seatmap"></div>
-      <div class="seatmap-legend" aria-hidden="true">
-        <span><i class="free"></i>Free</span>
-        <span><i class="freed"></i>Freed in the last 24 h</span>
-        <span id="seatmap-legend-fits"><i class="free fits"></i>Fits your group</span>
-        <span><i class="taken"></i>Taken</span>
-        <span><i class="free wheelchair"></i>Wheelchair space</span>
-        <span id="seatmap-legend-areas"><b class="area-key preferred"></b>Preferred <b class="area-key acceptable"></b>Acceptable</span>
-      </div>
-      <div class="modal-actions">
-        <button type="button" id="seatmap-edit-btn" class="link-btn" hidden>Edit seating areas</button>
-        <button type="button" id="seatmap-skip-btn" class="link-btn" hidden>Skip</button>
-        <button type="button" id="seatmap-clear-btn" class="link-btn" hidden>No areas</button>
-        <button type="button" id="seatmap-cancel-btn" class="link-btn" hidden>Cancel</button>
-        <button type="button" id="seatmap-save-btn" class="btn" hidden>Save areas</button>
-        <a id="seatmap-book" class="btn" target="_blank" rel="noopener" hidden>Book</a>
+    <div class="modal seatmap-modal" role="dialog" aria-modal="true" aria-labelledby="seatmap-title" tabindex="-1">
+      <div id="seatmap-view" class="seatmap-view">
+        <div class="modal-header">
+          <h2 id="seatmap-title">Seats</h2>
+          <button type="button" class="icon-btn seatmap-close" data-sheet-close aria-label="Close seat map">{{ close_icon() }}</button>
+        </div>
+        <div class="seatmap-top">
+          <div id="seatmap-stats" class="seatmap-stats" hidden></div>
+          <button type="button" id="seatmap-zoom-btn" class="btn btn-quiet" aria-pressed="false" hidden>My areas only</button>
+        </div>
+        <p id="seatmap-summary" class="seatmap-summary" aria-live="polite"></p>
+        <p id="seatmap-edit-hint" class="seatmap-edit-hint" aria-live="polite" hidden></p>
+        <div class="seatmap-scroll" id="seatmap-scroll">
+          <div id="seatmap" class="seatmap"></div>
+        </div>
+        <p id="seatmap-readout" class="seatmap-readout" aria-live="polite"></p>
+        <div class="seatmap-legend" aria-hidden="true">
+          <span><i class="free"></i>Free</span>
+          <span><i class="freed"></i>Freed in the last 24 h</span>
+          <span id="seatmap-legend-fits"><i class="free fits"></i>Fits your group</span>
+          <span><i class="taken"></i>Taken</span>
+          <span><i class="free wheelchair"></i>Wheelchair space</span>
+          <span id="seatmap-legend-areas"><b class="area-key preferred"></b>Preferred <b class="area-key acceptable"></b>Acceptable</span>
+        </div>
+        <div class="modal-actions seatmap-actions">
+          <button type="button" id="seatmap-edit-btn" class="btn btn-quiet" hidden>Edit seating areas</button>
+          <button type="button" id="seatmap-skip-btn" class="btn btn-quiet" hidden>Skip</button>
+          <button type="button" id="seatmap-clear-btn" class="btn btn-quiet" hidden>No areas</button>
+          <button type="button" id="seatmap-cancel-btn" class="btn btn-quiet" hidden>Cancel</button>
+          <button type="button" id="seatmap-save-btn" class="btn" hidden>Save areas</button>
+          <a id="seatmap-book" class="btn" target="_blank" rel="noopener" hidden>Book</a>
+        </div>
       </div>
     </div>
   </div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-// --- Overview: clamped to 3 lines on phones, "Read more" only if it overflows. ---
-(function () {
-  const overview = document.getElementById('overview');
-  const toggle = document.getElementById('overview-toggle');
-  if (!overview) return;
-  const p = overview.querySelector('p');
-  const update = () => { toggle.hidden = !overview.classList.contains('clamped') || p.scrollHeight <= p.clientHeight + 1; };
-  toggle.addEventListener('click', () => { overview.classList.remove('clamped'); toggle.hidden = true; });
-  update();
-  window.addEventListener('resize', update);
-})();
-
-// --- Per-movie settings sheet ---
-const settingsBtn = document.getElementById('settings-btn');
-const settingsOverlay = document.getElementById('settings-overlay');
-const settingsCloseBtn = document.getElementById('settings-close-btn');
-const settingsForm = document.getElementById('settings-form');
-const settingsApplyBtn = document.getElementById('settings-apply-btn');
-const settingsFields = Array.from(settingsForm.elements).filter(el => el.name);
-// Keyed by element, not name: several checkboxes share name="required_formats",
-// so a name-keyed map would only remember the last one's initial state.
-const isToggle = el => el.type === 'checkbox' || el.type === 'radio';
-const settingsInitial = new Map(settingsFields.map(el => [el, isToggle(el) ? el.checked : el.value]));
-
-function closeSettings() {
-  settingsOverlay.classList.remove('open');
-  setRemoveMovieConfirming(false);
-}
-
-function updateApplyState() {
-  settingsApplyBtn.disabled = !settingsFields.some(el => {
-    const current = isToggle(el) ? el.checked : el.value;
-    return current !== settingsInitial.get(el);
-  });
-}
-
-settingsBtn.addEventListener('click', () => openSheet(settingsOverlay));
-settingsCloseBtn.addEventListener('click', closeSettings);
-settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) closeSettings(); });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) closeSettings();
-});
-for (const el of settingsFields) {
-  el.addEventListener('input', updateApplyState);
-  el.addEventListener('change', updateApplyState);
-}
-
-// --- Stop monitoring: first tap arms the button, second tap removes. ---
-const removeMovieBtn = document.getElementById('remove-movie-btn');
-const removeMovieCancelBtn = document.getElementById('remove-movie-cancel-btn');
-const removeMovieForm = document.getElementById('remove-movie-form');
-
-function setRemoveMovieConfirming(confirming) {
-  removeMovieBtn.classList.toggle('confirming', confirming);
-  removeMovieCancelBtn.hidden = !confirming;
-  removeMovieBtn.textContent = confirming ? 'Tap again to remove' : 'Stop monitoring';
-}
-removeMovieBtn.addEventListener('click', () => {
-  if (removeMovieBtn.classList.contains('confirming')) {
-    removeMovieForm.submit();
-    return;
-  }
-  setRemoveMovieConfirming(true);
-});
-removeMovieCancelBtn.addEventListener('click', () => setRemoveMovieConfirming(false));
-
-// --- Check now + live status ---
-let lastUpdatedAt = {{ updated_at | tojson }};
-const movieId = {{ movie.id | tojson }};
-const apiStatusUrl = '{{ url_for("api_status") }}?movie_id=' + encodeURIComponent(movieId);
-const matchesUrl = '{{ url_for("api_movie_matches", movie_id=movie.id) }}';
-const checkBtn = document.getElementById('check-now-btn');
-const checkLabel = document.getElementById('check-now-label');
-const checkStatus = document.getElementById('check-now-status');
-const liveDot = document.getElementById('live-dot');
-const checkedTextEl = document.getElementById('checked-text');
-
-function formatRelative(isoStr) {
-  const seconds = Math.max((Date.now() - new Date(isoStr).getTime()) / 1000, 0);
-  if (seconds < 30) return 'just now';
-  const minutes = Math.floor((seconds + 30) / 60);
-  if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
-  const hours = Math.floor((seconds + 1800) / 3600);
-  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-  const days = Math.floor((seconds + 43200) / 86400);
-  return `${days} day${days !== 1 ? 's' : ''} ago`;
-}
-function renderCheckedText() {
-  if (!lastUpdatedAt) return;
-  checkedTextEl.textContent = `Checked ${formatRelative(lastUpdatedAt)}`;
-}
-setInterval(renderCheckedText, 15000);
-
-function setChecking(isChecking) {
-  checkBtn.disabled = isChecking;
-  checkBtn.classList.toggle('checking', isChecking);
-  checkLabel.textContent = isChecking ? 'Checking…' : 'Check now';
-  liveDot.classList.toggle('checking', isChecking);
-}
-
-// Fresh results arrived: redraw the showtimes in place, so the scroll
-// position, open filters and any open sheet stay as they are. Falls back
-// to a page reload if the data can't be fetched.
-async function refreshShowtimes() {
-  try {
-    const resp = await fetch(matchesUrl);
-    if (!resp.ok) throw new Error(resp.status);
-    const data = await resp.json();
-    lastUpdatedAt = data.updated_at;
-    renderCheckedText();
-    applyMatches(data.matches);
-  } catch (e) {
-    cxReload();
-  }
-}
-
-// Guards against the background poll piling on top of an in-flight wait.
-let watching = false;
-
-async function waitForResult() {
-  if (watching) return;
-  watching = true;
-  setChecking(true);
-  for (let i = 0; i < 40; i++) {
-    await new Promise(r => setTimeout(r, 2000));
-    try {
-      const data = await (await fetch(apiStatusUrl)).json();
-      if (data.updated_at && data.updated_at !== lastUpdatedAt) { await refreshShowtimes(); break; }
-      if (!data.checking) break;
-    } catch (e) { /* transient; keep waiting */ }
-  }
-  setChecking(false);
-  watching = false;
-}
-
-checkBtn.addEventListener('click', async () => {
-  setChecking(true);
-  checkStatus.hidden = true;
-  try {
-    const resp = await fetch('{{ url_for("check_now") }}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ movie_id: movieId }),
-    });
-    if (!resp.ok) throw new Error();
-  } catch (e) {
-    setChecking(false);
-    checkStatus.textContent = 'Could not reach the scraper. It may be restarting; try again in a minute.';
-    checkStatus.hidden = false;
-    return;
-  }
-  waitForResult();
-});
-
-// The scraper also checks on its own schedule, so poll for that too and
-// reflect it exactly like a manual check.
-async function pollForBackgroundCheck() {
-  if (watching || document.hidden) return;
-  try {
-    const data = await (await fetch(apiStatusUrl)).json();
-    if (data.updated_at && data.updated_at !== lastUpdatedAt) { refreshShowtimes(); return; }
-    if (data.checking) waitForResult();
-  } catch (e) { /* transient network hiccup; retry on the next tick */ }
-}
-pollForBackgroundCheck();
-setInterval(pollForBackgroundCheck, 10000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) pollForBackgroundCheck(); });
-
-// --- Watch rules in the settings sheet. The rules are kept in a hidden
-// input as JSON, so the normal "Save changes" flow submits them. ---
-{
-  const section = document.getElementById('watch-rules-section');
-  const list = document.getElementById('watch-rules');
-  const input = document.getElementById('watch-rules-input');
-  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const PRESETS = {
-    evenings: () => ({ days: [1, 2, 3, 4, 5], from: '17:00', to: '23:59', date_from: '', date_to: '' }),
-    weekends: () => ({ days: [6, 7], from: '00:00', to: '23:59', date_from: '', date_to: '' }),
-    range: () => {
-      const today = new Date().toISOString().slice(0, 10);
-      return { days: [1, 2, 3, 4, 5, 6, 7], from: '00:00', to: '23:59', date_from: today, date_to: '' };
-    },
-    custom: () => ({ days: [1, 2, 3, 4, 5, 6, 7], from: '00:00', to: '23:59', date_from: '', date_to: '' }),
-  };
-  let rules = JSON.parse(input.value || '[]');
-
-  function save() {
-    input.value = JSON.stringify(rules);
-    updateApplyState();
-  }
-
-  function field(type, value, label, onChange) {
-    const el = document.createElement('input');
-    el.type = type;
-    el.value = value;
-    el.setAttribute('aria-label', label);
-    el.addEventListener('change', () => { onChange(el.value); save(); });
-    return el;
-  }
-
-  function render() {
-    list.replaceChildren();
-    rules.forEach((rule, i) => {
-      const box = document.createElement('div');
-      box.className = 'watch-rule';
-      const days = document.createElement('div');
-      days.className = 'rule-days';
-      DAYS.forEach((name, d) => {
-        const label = document.createElement('label');
-        label.className = 'chip';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = rule.days.includes(d + 1);
-        cb.addEventListener('change', () => {
-          rule.days = cb.checked ? [...rule.days, d + 1].sort() : rule.days.filter(x => x !== d + 1);
-          save();
-        });
-        label.append(cb, ` ${name}`);
-        days.appendChild(label);
-      });
-      const between = (label, from, to) => {
-        const line = document.createElement('div');
-        line.className = 'rule-range';
-        const name = document.createElement('span');
-        name.textContent = label;
-        const sep = document.createElement('span');
-        sep.textContent = 'to';
-        line.append(name, from, sep, to);
-        return line;
-      };
-      const times = between('Starts',
-        field('time', rule.from, 'Earliest start', v => { rule.from = v || '00:00'; }),
-        field('time', rule.to, 'Latest start', v => { rule.to = v || '23:59'; }));
-      const dates = between('Dates',
-        field('date', rule.date_from, 'First date (empty for no limit)', v => { rule.date_from = v; }),
-        field('date', rule.date_to, 'Last date (empty for no limit)', v => { rule.date_to = v; }));
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'link-btn';
-      remove.textContent = 'Remove rule';
-      remove.addEventListener('click', () => { rules.splice(i, 1); render(); save(); });
-      box.append(days, times, dates, remove);
-      list.appendChild(box);
-    });
-  }
-
-  for (const b of section.querySelectorAll('[data-preset]')) {
-    b.addEventListener('click', () => { rules.push(PRESETS[b.dataset.preset]()); render(); save(); });
-  }
-  for (const radio of document.querySelectorAll('input[name="seat_alerts"]')) {
-    radio.addEventListener('change', () => { section.hidden = radio.value !== 'custom' || !radio.checked; });
-  }
-  render();
-}
-
-// --- Bells: which dates and showtimes can send a "seats freed up" push.
-// Only shown in "Custom" mode. Mirrors storage.watches_showtime(). ---
-const PICK_MODE = {{ (movie.seat_alerts == 'custom') | tojson }};
-const WATCH_RULES = {{ (movie.watch_rules or []) | tojson }};
-let picks = {
-  dates: new Set({{ (movie.watched_dates or []) | tojson }}),
-  ids: new Set({{ (movie.watched_event_ids or []) | tojson }}),
-  off: new Set({{ (movie.unwatched_event_ids or []) | tojson }}),
-};
-const watchUrl = '{{ url_for("update_watched", movie_id=movie.id) }}';
-// Replaced below with the function that redraws the showtimes.
-let redrawShowtimes = () => {};
-
-// start_time is Prague local time without an offset, like the rules.
-const showDay = m => (m.start_time || '').slice(0, 10);
-function matchesRule(rule, m) {
-  const day = showDay(m);
-  const hhmm = (m.start_time || '').slice(11, 16);
-  const weekday = new Date(`${day}T00:00:00`).getDay() || 7;
-  return rule.days.includes(weekday) && rule.from <= hhmm && hhmm <= rule.to
-    && (!rule.date_from || day >= rule.date_from) && (!rule.date_to || day <= rule.date_to);
-}
-const ruleCovers = m => WATCH_RULES.some(rule => matchesRule(rule, m));
-const watchedIn = (p, m) => !p.off.has(m.event_id)
-  && (p.dates.has(showDay(m)) || p.ids.has(m.event_id) || ruleCovers(m));
-const isWatched = m => watchedIn(picks, m);
-const copyPicks = () => ({ dates: new Set(picks.dates), ids: new Set(picks.ids), off: new Set(picks.off) });
-
-async function savePicks(next) {
-  const before = picks;
-  picks = next;
-  redrawShowtimes();
-  try {
-    const resp = await fetch(watchUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        watched_dates: [...next.dates], watched_event_ids: [...next.ids], unwatched_event_ids: [...next.off],
-      }),
-    });
-    if (!resp.ok) throw new Error(resp.status);
-  } catch (e) {
-    picks = before;
-    redrawShowtimes();
-    checkStatus.textContent = 'Could not save the bell. Try again.';
-    checkStatus.hidden = false;
-  }
-}
-
-// Turning one showtime off on a picked date keeps the date's other showtimes.
-function toggleShowtime(m) {
-  const next = copyPicks();
-  if (isWatched(m)) {
-    next.ids.delete(m.event_id);
-    if (next.dates.delete(showDay(m))) {
-      for (const other of MATCHES) if (showDay(other) === showDay(m) && other.event_id !== m.event_id) next.ids.add(other.event_id);
-    }
-    if (ruleCovers(m)) next.off.add(m.event_id);
-  } else {
-    next.off.delete(m.event_id);
-    if (!watchedIn(next, m)) next.ids.add(m.event_id);
-  }
-  savePicks(next);
-}
-
-const dayShows = day => MATCHES.filter(m => showDay(m) === day);
-const isDayWatched = day => dayShows(day).every(isWatched);
-
-function toggleDate(day) {
-  const next = copyPicks();
-  const on = isDayWatched(day);
-  for (const m of dayShows(day)) {
-    next.ids.delete(m.event_id);
-    next.off.delete(m.event_id);
-    if (on && ruleCovers(m)) next.off.add(m.event_id);
-  }
-  if (on) next.dates.delete(day); else next.dates.add(day);
-  savePicks(next);
-}
-
-const BELL_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
-
-function bellButton(on, label, onClick) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'icon-btn bell' + (on ? ' on' : '');
-  b.innerHTML = BELL_ICON;
-  b.setAttribute('aria-pressed', String(on));
-  b.setAttribute('aria-label', label);
-  b.title = on ? 'Freed seats send a push' : 'Freed seats send no push';
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-// --- Seat map: one grid for the whole hall (first column holds the row
-// names), so a seating area is one box spanning its rows and columns. ---
-const seatmapOverlay = document.getElementById('seatmap-overlay');
-const seatmapEl = document.getElementById('seatmap');
-const seatmapTitle = document.getElementById('seatmap-title');
-const seatmapSummary = document.getElementById('seatmap-summary');
-const seatmapStats = document.getElementById('seatmap-stats');
-const seatmapEditHint = document.getElementById('seatmap-edit-hint');
-const seatmapBook = document.getElementById('seatmap-book');
-const seatmapLegendFits = document.getElementById('seatmap-legend-fits');
-const seatmapLegendAreas = document.getElementById('seatmap-legend-areas');
-const seatmapBtns = Object.fromEntries(['edit', 'skip', 'clear', 'cancel', 'save'].map(k => [k, document.getElementById(`seatmap-${k}-btn`)]));
-const seatsUrl = eid => '{{ url_for("api_seat_map", movie_id=movie.id, event_id="EVENT_ID") }}'.replace('EVENT_ID', encodeURIComponent(eid));
-const areasUrl = '{{ url_for("update_seat_areas") }}';
-const AREA_STEPS = ['preferred', 'acceptable'];
-let seatmapSeq = 0;
-let seatmapData = null;
-let seatmapShow = null;
-// While editing: {step: index into AREA_STEPS, corner: first tapped seat, areas}.
-let editing = null;
-
-function closeSeatmap() { seatmapOverlay.classList.remove('open'); seatmapSeq++; editing = null; }
-document.getElementById('seatmap-close-btn').addEventListener('click', closeSeatmap);
-seatmapOverlay.addEventListener('click', (e) => { if (e.target === seatmapOverlay) closeSeatmap(); });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && seatmapOverlay.classList.contains('open')) closeSeatmap();
-});
-
-function rowIndexRange(rows, rect) {
-  const idx = rows.map((r, i) => [r.y, i]).filter(([y]) => y >= rect.rows[0] && y <= rect.rows[1]).map(([, i]) => i);
-  return idx.length ? [idx[0], idx[idx.length - 1]] : null;
-}
-
-function drawSeatmap() {
-  const data = seatmapData;
-  const areas = editing ? editing.areas : data.areas;
-  const cols = data.max_x - data.min_x + 1;
-  seatmapEl.replaceChildren();
-  seatmapEl.style.setProperty('--cols', cols);
-  seatmapEl.classList.toggle('editing', !!editing);
-  const screen = document.createElement('div');
-  screen.className = 'seatmap-screen';
-  screen.textContent = 'Screen';
-  seatmapEl.appendChild(screen);
-  data.rows.forEach((row, i) => {
-    const name = document.createElement('span');
-    name.className = 'seatmap-row-name';
-    name.style.gridRow = String(i + 2);
-    name.textContent = row.name;
-    seatmapEl.appendChild(name);
-    for (const seat of row.seats) {
-      const el = document.createElement('i');
-      el.className = seat.state + (seat.fits ? ' fits' : '') + (seat.wheelchair ? ' wheelchair' : '')
-        + (!editing && seat.area === null ? ' outside' : '')
-        + (editing && editing.corner && editing.corner.x === seat.x && editing.corner.y === row.y ? ' corner' : '');
-      el.style.gridRow = String(i + 2);
-      el.style.gridColumn = String(seat.x - data.min_x + 2);
-      el.title = `Row ${row.name}, seat ${seat.name}: ${seat.state === 'taken' ? 'taken' : seat.state === 'freed' ? 'freed' : 'free'}`;
-      if (editing) el.addEventListener('click', () => tapSeat(seat.x, row.y));
-      seatmapEl.appendChild(el);
-    }
-  });
-  for (const area of AREA_STEPS) {
-    const rect = areas[area];
-    const span = rect && rowIndexRange(data.rows, rect);
-    if (!span) continue;
-    const box = document.createElement('div');
-    box.className = `seatmap-area ${area}`;
-    box.style.gridRow = `${span[0] + 2} / ${span[1] + 3}`;
-    box.style.gridColumn = `${Math.max(rect.cols[0], data.min_x) - data.min_x + 2} / ${Math.min(rect.cols[1], data.max_x) - data.min_x + 3}`;
-    seatmapEl.appendChild(box);
-  }
-  seatmapLegendAreas.hidden = !(areas.preferred || areas.acceptable);
-  updateSeatmapControls();
-}
-
-// Free seats as a row of counts (in the area colours when the hall has
-// areas), then one line with what changed and whether your group fits.
-function describeSeatmap() {
-  const data = seatmapData;
-  const stats = [[data.free, `free of ${data.capacity}`, '']];
-  if (data.free_by_area) {
-    stats.push([data.free_by_area.preferred, 'preferred', 'preferred'], [data.free_by_area.acceptable, 'acceptable', 'acceptable']);
-  }
-  seatmapStats.replaceChildren(...stats.map(([n, label, cls]) => {
-    const item = document.createElement('div');
-    item.className = `seatmap-stat ${cls}`;
-    const num = document.createElement('strong');
-    num.textContent = String(n);
-    const text = document.createElement('span');
-    text.textContent = label;
-    item.append(num, text);
-    return item;
-  }));
-  seatmapStats.hidden = false;
-  const parts = [];
-  if (data.freed) parts.push(`${data.freed} freed in the last 24 hours.`);
-  if (data.seats_wanted > 1) {
-    const where = data.free_by_area ? ' in your areas' : '';
-    parts.push(data.fits ? `${data.seats_wanted} together fit${where}.` : `${data.seats_wanted} together don't fit${where}.`);
-  }
-  parts.push(`As of ${formatRelative(data.checked_at)}.`);
-  seatmapSummary.textContent = parts.join(' ');
-  seatmapLegendFits.hidden = !(data.seats_wanted > 1);
-}
-
-function updateSeatmapControls() {
-  const loaded = !!seatmapData;
-  seatmapBtns.edit.hidden = !loaded || !!editing;
-  for (const k of ['skip', 'clear', 'cancel', 'save']) seatmapBtns[k].hidden = !editing;
-  seatmapBtns.skip.hidden = !editing || editing.step >= AREA_STEPS.length;
-  seatmapBtns.save.disabled = !!editing && editing.step < AREA_STEPS.length;
-  seatmapBook.hidden = !!editing || !(seatmapShow && seatmapShow.booking_link);
-  seatmapEditHint.hidden = !editing;
-  if (!editing) return;
-  if (editing.step >= AREA_STEPS.length) {
-    seatmapEditHint.textContent = 'Save the areas, or tap Cancel. They apply to every showtime in this hall.';
-  } else {
-    const area = AREA_STEPS[editing.step];
-    seatmapEditHint.textContent = editing.corner
-      ? `Tap the opposite corner seat of the ${area} area.`
-      : `Tap one corner seat of the ${area} area${area === 'acceptable' ? ' (it may include the preferred area)' : ''}, or tap Skip.`;
-  }
-}
-
-function tapSeat(x, y) {
-  if (!editing || editing.step >= AREA_STEPS.length) return;
-  if (!editing.corner) {
-    editing.corner = { x, y };
-  } else {
-    const c = editing.corner;
-    editing.areas[AREA_STEPS[editing.step]] = { rows: [Math.min(c.y, y), Math.max(c.y, y)], cols: [Math.min(c.x, x), Math.max(c.x, x)] };
-    editing.corner = null;
-    editing.step++;
-  }
-  drawSeatmap();
-}
-
-seatmapBtns.edit.addEventListener('click', () => {
-  editing = { step: 0, corner: null, areas: {} };
-  drawSeatmap();
-  // Seats get bigger to tap; start with the middle of the hall in view.
-  seatmapEl.scrollLeft = (seatmapEl.scrollWidth - seatmapEl.clientWidth) / 2;
-});
-seatmapBtns.skip.addEventListener('click', () => { editing.corner = null; editing.step++; drawSeatmap(); });
-seatmapBtns.clear.addEventListener('click', () => { editing = { step: AREA_STEPS.length, corner: null, areas: {} }; drawSeatmap(); });
-seatmapBtns.cancel.addEventListener('click', () => { editing = null; drawSeatmap(); });
-seatmapBtns.save.addEventListener('click', async () => {
-  seatmapBtns.save.disabled = true;
-  try {
-    const resp = await fetch(areasUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hall: seatmapData.hall, ...editing.areas }),
-    });
-    if (!resp.ok) throw new Error(resp.status);
-    editing = null;
-    loadSeatmap(seatmapShow);
-  } catch (e) {
-    seatmapEditHint.textContent = 'Could not save the areas. Try again.';
-    seatmapBtns.save.disabled = false;
-  }
-});
-
-async function loadSeatmap(m) {
-  const seq = ++seatmapSeq;
-  try {
-    const resp = await fetch(seatsUrl(m.event_id));
-    const data = await resp.json();
-    if (seq !== seatmapSeq) return;
-    if (!resp.ok) { seatmapSummary.textContent = data.error || 'Could not load the seats.'; return; }
-    seatmapData = data;
-    describeSeatmap();
-    drawSeatmap();
-  } catch (e) {
-    if (seq === seatmapSeq) seatmapSummary.textContent = 'Could not load the seats. Try again in a minute.';
-  }
-}
-
-function openSeatmap(m) {
-  const dt = new Date(m.start_time);
-  seatmapTitle.textContent = `${dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')} · ${m.auditorium || 'Seats'}`;
-  seatmapSummary.textContent = 'Loading the seats…';
-  seatmapStats.hidden = true;
-  seatmapEl.replaceChildren();
-  seatmapData = null;
-  seatmapShow = m;
-  editing = null;
-  if (m.booking_link) seatmapBook.href = m.booking_link;
-  updateSeatmapControls();
-  openSheet(seatmapOverlay);
-  loadSeatmap(m);
-}
-
-// --- Showtimes: list (by day or by free seats) and calendar, both drawn
-// from MATCHES with the same filters and the same row component. ---
-let MATCHES = {{ matches | tojson }};
-// Replaced below with the function that redraws everything for new data.
-let applyMatches = () => cxReload();
-{
-  const listView = document.getElementById('list-view');
-  const calendarView = document.getElementById('calendar-view');
-  const noResults = document.getElementById('no-results');
-  const viewListBtn = document.getElementById('view-list-btn');
-  const viewCalendarBtn = document.getElementById('view-calendar-btn');
-  const filterLowAvail = document.getElementById('filter-low-avail');
-  const filterTimeFrom = document.getElementById('filter-time-from');
-  const filterTimeTo = document.getElementById('filter-time-to');
-  const weekdayCheckboxes = Array.from(document.querySelectorAll('.filter-weekday'));
-  const showsUi = document.getElementById('shows-ui');
-  const emptyState = document.getElementById('empty-state');
-  let audioLanguageCheckboxes = [];
-  let formatCheckboxes = [];
-  const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
-  const sortField = document.getElementById('sort-field');
-  const filtersToggle = document.getElementById('filters-toggle');
-  const filtersPanel = document.getElementById('filters-panel');
-  const filtersBadge = document.getElementById('filters-badge');
-  const calGrid = document.getElementById('calendar-grid');
-  const calMonthLabel = document.getElementById('cal-month-label');
-  const agenda = document.getElementById('agenda');
-
-  const LOW_AVAILABILITY_THRESHOLD = 0.3;
-  const NEW_WINDOW_MS = 24 * 3600 * 1000;
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  let sortMode = 'date';
-
-  // sale_start is Prague local time without an offset, like start_time.
-  const saleUpcoming = m => !!m.sale_start && new Date(m.sale_start) > new Date();
-  // A literal sold_out flag and anything that *displays* as 0% read the same.
-  // Before booking opens, the low pre-sale ratio doesn't mean sold out.
-  const isSoldOut = m => !saleUpcoming(m) && (!!m.sold_out || (m.availability != null && m.availability < 0.005));
-  const saleOpensLabel = m => {
-    const d = new Date(m.sale_start);
-    return `Opens ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${hhmm(d)}`;
-  };
-  // Share of free seats: in the seating areas once the scraper has the
-  // seats (webui.seat_ratio), else the feed's share of the whole hall.
-  const ratioOf = m => (m.seat_ratio != null ? m.seat_ratio : m.availability);
-  // Same thresholds as webui.py's card_status_tier, so a colour means the
-  // same thing on the index and here. No free seat in your area reads
-  // like sold out.
-  function tier(m) {
-    if (saleUpcoming(m)) return 'upcoming';
-    if (isSoldOut(m)) return 'sold';
-    const r = ratioOf(m);
-    if (r == null) return 'none';
-    if (r < 0.005) return 'sold';
-    if (r >= 0.5) return 'good';
-    if (r >= 0.15) return 'fair';
-    return 'low';
-  }
-  const pad = n => String(n).padStart(2, '0');
-  const dateKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const hhmm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-  function dayTitle(key) {
-    const d = new Date(`${key}T00:00:00`);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const diff = Math.round((d - today) / 86400000);
-    const opts = { weekday: 'long', day: 'numeric', month: 'long' };
-    if (d.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
-    const label = d.toLocaleDateString('en-GB', opts);
-    return diff === 0 ? `Today, ${label}` : diff === 1 ? `Tomorrow, ${label}` : label;
-  }
-
-  const dayBell = key => bellButton(isDayWatched(key), `Push freed seats for every showtime on ${dayTitle(key)}`, () => toggleDate(key));
-
-  // Matches the seats() macro in _macros.html.
-  function seatStrip(m) {
-    const strip = document.createElement('span');
-    const t = tier(m);
-    strip.className = `seats ${t}`;
-    const r = ratioOf(m);
-    const lit = isSoldOut(m) || r == null || r < 0.005 ? 0 : Math.max(1, Math.round(r * 20));
-    for (let i = 0; i < 20; i++) {
-      const seat = document.createElement('i');
-      if (i < lit) seat.className = 'on';
-      strip.appendChild(seat);
-    }
-    strip.setAttribute('aria-hidden', 'true');
-    return strip;
-  }
-
-  function showRow(m, withDate) {
-    const dt = new Date(m.start_time);
-    const sold = isSoldOut(m);
-    const t = tier(m);
-    const row = document.createElement('article');
-    row.className = 'show' + (sold ? ' sold' : '') + (withDate ? ' dated' : '');
-
-    const time = document.createElement('div');
-    time.className = 'show-time';
-    if (withDate) {
-      const date = document.createElement('span');
-      date.className = 'show-date';
-      date.textContent = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-      time.appendChild(date);
-    }
-    time.append(hhmm(dt));
-
-    const info = document.createElement('div');
-    info.className = 'show-info';
-    const hall = document.createElement('span');
-    hall.className = 'hall';
-    hall.textContent = m.auditorium || 'Unknown hall';
-    info.appendChild(hall);
-    if (!sold && m.fetched_at && Date.now() - new Date(m.fetched_at).getTime() < NEW_WINDOW_MS) {
-      const badge = document.createElement('span');
-      badge.className = 'badge-new';
-      badge.textContent = 'New';
-      badge.title = `First seen ${formatRelative(m.fetched_at)}`;
-      info.appendChild(badge);
-    }
-    if (!sold && m.freed_seats) {
-      const badge = document.createElement('span');
-      badge.className = 'badge-freed';
-      badge.textContent = `+${m.freed_seats} freed`;
-      badge.title = `${m.freed_seats} seat${m.freed_seats !== 1 ? 's' : ''} freed up in the last 24 hours, the last ${formatRelative(m.freed_at)}`;
-      info.appendChild(badge);
-    }
-    const tags = [];
-    if (m.format) tags.push([m.format, `${m.format} screening`]);
-    if (m.audio_language_code) tags.push([m.audio_language_code.toUpperCase(), `${m.audio_language} audio`]);
-    if (m.subtitle_language_code) tags.push([`${m.subtitle_language_code.toUpperCase()} subs`, `${m.subtitle_language} subtitles`]);
-    if (m.member_only) tags.push(['Members only', 'Only Cinema City members can book this showtime']);
-    for (const [text, title] of tags) {
-      const tag = document.createElement('span');
-      tag.className = 'tag';
-      tag.textContent = text;
-      tag.title = title;
-      info.appendChild(tag);
-    }
-
-    const seats = document.createElement('div');
-    seats.className = 'show-seats';
-    // Seat counts mean nothing before booking opens - the opening time
-    // gets the strip's room instead.
-    if (t !== 'upcoming') seats.appendChild(seatStrip(m));
-    const canMap = m.has_seat_map && t !== 'upcoming';
-    const label = document.createElement(canMap ? 'button' : 'span');
-    label.className = `seat-label tier-${t}`;
-    label.textContent = t === 'upcoming' ? saleOpensLabel(m)
-      : sold ? 'Sold out'
-      : m.free_seats != null ? `${m.free_seats} of ${m.capacity} ${m.in_areas ? 'in your area' : 'free'}`
-      : m.availability != null ? `${Math.round(m.availability * 100)}% free` : 'Seats unknown';
-    if (t === 'upcoming') label.title = 'Booking opens at this time. The booking page can be opened before.';
-    if (canMap) {
-      label.type = 'button';
-      label.classList.add('seat-map-btn');
-      label.setAttribute('aria-label', `${label.textContent}. Show the seat map`);
-      label.addEventListener('click', () => openSeatmap(m));
-    }
-    seats.appendChild(label);
-
-    const book = document.createElement('div');
-    book.className = 'show-book';
-    if (PICK_MODE && !sold) {
-      const bell = bellButton(isWatched(m), `Push freed seats for ${hhmm(dt)}`, () => toggleShowtime(m));
-      bell.classList.add('show-bell');
-      row.appendChild(bell);
-    }
-    if (!sold && m.booking_link) {
-      const a = document.createElement('a');
-      a.className = 'btn';
-      a.href = m.booking_link;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.textContent = 'Book';
-      a.setAttribute('aria-label', `Book ${hhmm(dt)} on ${dt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}`);
-      book.appendChild(a);
-    }
-
-    row.append(time, info, seats, book);
-    return row;
-  }
-
-  // --- filters (persisted per movie; v2 key so the old default of hiding
-  // low availability, which hid exactly the pre-sale showtimes this app
-  // watches for, doesn't carry over) ---
-  const FILTERS_STORAGE_KEY = `cc-filters-v2:${movieId}`;
-  const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-
-  function saveFilterState() {
-    const state = {
-      sort: sortMode,
-      lowAvail: filterLowAvail.checked,
-      timeFrom: filterTimeFrom.value,
-      timeTo: filterTimeTo.value,
-      weekdays: Object.fromEntries(weekdayCheckboxes.map(cb => [cb.dataset.day, cb.checked])),
-      audioLanguages: Object.fromEntries(audioLanguageCheckboxes.map(cb => [cb.dataset.lang, cb.checked])),
-      formats: Object.fromEntries(formatCheckboxes.map(cb => [cb.dataset.format, cb.checked])),
-    };
-    try { localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* private mode */ }
-  }
-
-  function savedFilterState() {
-    try { return JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY)) || {}; } catch (e) { return {}; }
-  }
-
-  function loadFilterState() {
-    const saved = savedFilterState();
-    if (saved.sort === 'date' || saved.sort === 'seats') sortMode = saved.sort;
-    if (typeof saved.lowAvail === 'boolean') filterLowAvail.checked = saved.lowAvail;
-    if (TIME_RE.test(saved.timeFrom)) filterTimeFrom.value = saved.timeFrom;
-    if (TIME_RE.test(saved.timeTo)) filterTimeTo.value = saved.timeTo;
-    for (const cb of weekdayCheckboxes) if (saved.weekdays && cb.dataset.day in saved.weekdays) cb.checked = saved.weekdays[cb.dataset.day];
-  }
-
-  function countActiveFilters() {
-    let count = 0;
-    if (filterLowAvail.checked) count++;
-    if (filterTimeFrom.value !== '00:00' || filterTimeTo.value !== '23:59') count++;
-    if (weekdayCheckboxes.some(cb => !cb.checked)) count++;
-    if (audioLanguageCheckboxes.some(cb => !cb.checked)) count++;
-    if (formatCheckboxes.some(cb => !cb.checked)) count++;
-    return count;
-  }
-
-  function passesFilters(m) {
-    if (!m.start_time) return false;
-    if (filterLowAvail.checked && !saleUpcoming(m) && (isSoldOut(m) || (ratioOf(m) != null && ratioOf(m) < LOW_AVAILABILITY_THRESHOLD))) return false;
-    const dt = new Date(m.start_time);
-    const t = hhmm(dt);
-    const from = TIME_RE.test(filterTimeFrom.value) ? filterTimeFrom.value : '00:00';
-    const to = TIME_RE.test(filterTimeTo.value) ? filterTimeTo.value : '23:59';
-    if (t < from || t > to) return false;
-    if (!weekdayCheckboxes.some(cb => cb.checked && +cb.dataset.day === dt.getDay())) return false;
-    const lang = m.audio_language || 'Unknown';
-    if (audioLanguageCheckboxes.length && !audioLanguageCheckboxes.some(cb => cb.checked && cb.dataset.lang === lang)) return false;
-    const fmt = m.format || 'Unknown';
-    if (formatCheckboxes.length && !formatCheckboxes.some(cb => cb.checked && cb.dataset.format === fmt)) return false;
-    return true;
-  }
-
-  const filtered = () => MATCHES.filter(passesFilters);
-  const byStart = (a, b) => (a.start_time || '').localeCompare(b.start_time || '');
-  // Not on sale yet sorts after every bookable showtime, before sold out.
-  const seatsValue = m => saleUpcoming(m) ? -0.5 : isSoldOut(m) || ratioOf(m) == null ? -1 : ratioOf(m);
-
-  function renderList() {
-    const items = filtered();
-    listView.replaceChildren();
-    if (sortMode === 'seats') {
-      items.sort((a, b) => seatsValue(b) - seatsValue(a) || byStart(a, b));
-      for (const m of items) listView.appendChild(showRow(m, true));
-      return items.length;
-    }
-    const groups = new Map();
-    for (const m of items.sort(byStart)) {
-      const key = dateKey(new Date(m.start_time));
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(m);
-    }
-    for (const [key, shows] of groups) {
-      const section = document.createElement('section');
-      section.className = 'day';
-      const head = document.createElement('div');
-      head.className = 'day-head';
-      const h = document.createElement('h3');
-      h.textContent = dayTitle(key);
-      const count = document.createElement('span');
-      count.className = 'day-count';
-      count.textContent = `${shows.length} showtime${shows.length !== 1 ? 's' : ''}`;
-      head.append(h, count);
-      if (PICK_MODE) head.appendChild(dayBell(key));
-      section.appendChild(head);
-      for (const m of shows) section.appendChild(showRow(m, false));
-      listView.appendChild(section);
-    }
-    return items.length;
-  }
-
-  // --- calendar ---
-  let calendarMonth = null;
-  let selectedDayKey = null;
-
-  function groupedByDay(items) {
-    const map = new Map();
-    for (const m of items) {
-      const key = dateKey(new Date(m.start_time));
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(m);
-    }
-    return map;
-  }
-
-  function dayTier(shows) {
-    const open = shows.filter(m => !saleUpcoming(m) && !isSoldOut(m) && ratioOf(m) != null);
-    if (!open.length) return shows.some(saleUpcoming) ? 'upcoming' : 'sold';
-    return tier(open.reduce((a, b) => (ratioOf(b) > ratioOf(a) ? b : a)));
-  }
-
-  function renderAgenda(byDay) {
-    agenda.replaceChildren();
-    if (!selectedDayKey || !byDay.has(selectedDayKey)) return;
-    const section = document.createElement('section');
-    section.className = 'day';
-    const head = document.createElement('div');
-    head.className = 'day-head';
-    const h = document.createElement('h3');
-    h.textContent = dayTitle(selectedDayKey);
-    head.appendChild(h);
-    if (PICK_MODE) head.appendChild(dayBell(selectedDayKey));
-    section.appendChild(head);
-    for (const m of byDay.get(selectedDayKey).slice().sort(byStart)) section.appendChild(showRow(m, false));
-    agenda.appendChild(section);
-  }
-
-  function renderCalendar() {
-    const items = filtered();
-    const byDay = groupedByDay(items);
-    const keys = Array.from(byDay.keys()).sort();
-    if (!calendarMonth) {
-      const seed = keys[0] ? new Date(`${keys[0]}T00:00:00`) : new Date();
-      calendarMonth = new Date(seed.getFullYear(), seed.getMonth(), 1);
-    }
-    if (selectedDayKey === null || !byDay.has(selectedDayKey)) {
-      const monthPrefix = `${calendarMonth.getFullYear()}-${pad(calendarMonth.getMonth() + 1)}`;
-      selectedDayKey = keys.find(k => k.startsWith(monthPrefix)) || null;
-    }
-    calMonthLabel.textContent = `${MONTHS[calendarMonth.getMonth()]} ${calendarMonth.getFullYear()}`;
-    calGrid.replaceChildren();
-    for (const w of WEEKDAYS) {
-      const el = document.createElement('div');
-      el.className = 'cal-wd';
-      el.textContent = w;
-      calGrid.appendChild(el);
-    }
-    const offset = (calendarMonth.getDay() + 6) % 7; // Monday-first
-    for (let i = 0; i < offset; i++) {
-      const blank = document.createElement('div');
-      blank.className = 'cal-day blank';
-      calGrid.appendChild(blank);
-    }
-    const daysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
-    const todayKey = dateKey(new Date());
-    for (let day = 1; day <= daysInMonth; day++) {
-      const key = dateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day));
-      const shows = byDay.get(key);
-      const cell = document.createElement(shows ? 'button' : 'div');
-      cell.className = 'cal-day';
-      cell.textContent = String(day);
-      if (key === todayKey) cell.classList.add('today');
-      if (shows) {
-        cell.type = 'button';
-        cell.classList.add('has', dayTier(shows));
-        cell.setAttribute('aria-label', `${dayTitle(key)}, ${shows.length} showtime${shows.length !== 1 ? 's' : ''}`);
-        if (key === selectedDayKey) { cell.classList.add('selected'); cell.setAttribute('aria-pressed', 'true'); }
-        cell.addEventListener('click', () => {
-          selectedDayKey = key;
-          renderCalendar();
-          agenda.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        });
-      }
-      calGrid.appendChild(cell);
-    }
-    renderAgenda(byDay);
-    return items.length;
-  }
-
-  // --- view switching (persisted per movie on reload; a fresh visit uses
-  // the "Open movies in" setting) ---
-  const VIEW_STORAGE_KEY = `cc-view:${movieId}`;
-  const DEFAULT_VIEW = {{ settings.default_view | tojson }};
-  let view = 'list';
-
-  function isReloadNavigation() {
-    const [entry] = performance.getEntriesByType('navigation');
-    if (entry && entry.type === 'reload') return true;
-    try { return !!document.referrer && new URL(document.referrer).pathname === location.pathname; } catch (e) { return false; }
-  }
-
-  function initialView() {
-    if (isReloadNavigation()) {
-      const saved = localStorage.getItem(VIEW_STORAGE_KEY);
-      if (saved === 'list' || saved === 'calendar') return saved;
-    }
-    return DEFAULT_VIEW === 'calendar' ? 'calendar' : 'list';
-  }
-
-  function refresh() {
-    const isList = view === 'list';
-    listView.hidden = !isList;
-    calendarView.hidden = isList;
-    sortField.hidden = !isList;
-    viewListBtn.setAttribute('aria-pressed', String(isList));
-    viewCalendarBtn.setAttribute('aria-pressed', String(!isList));
-    for (const b of sortButtons) b.setAttribute('aria-pressed', String(b.dataset.sort === sortMode));
-    const count = isList ? renderList() : renderCalendar();
-    noResults.hidden = count > 0;
-    if (!isList) calendarView.hidden = count === 0;
-    const active = countActiveFilters();
-    filtersBadge.textContent = String(active);
-    filtersBadge.hidden = active === 0;
-  }
-
-  function setView(v) {
-    view = v;
-    try { localStorage.setItem(VIEW_STORAGE_KEY, v); } catch (e) { /* private mode */ }
-    refresh();
-  }
-
-  function onFilterChange() {
-    saveFilterState();
-    refresh();
-  }
-
-  function resetFilters() {
-    filterLowAvail.checked = false;
-    filterTimeFrom.value = '00:00';
-    filterTimeTo.value = '23:59';
-    for (const cb of [...weekdayCheckboxes, ...audioLanguageCheckboxes, ...formatCheckboxes]) cb.checked = true;
-    sortMode = 'date';
-    onFilterChange();
-  }
-
-  filtersToggle.addEventListener('click', () => {
-    const open = filtersPanel.classList.toggle('open');
-    filtersToggle.setAttribute('aria-expanded', String(open));
-  });
-  for (const cb of [filterLowAvail, ...weekdayCheckboxes]) {
-    cb.addEventListener('change', onFilterChange);
-  }
-
-  // Audio and format chips list only values that occur in the showtimes
-  // (a field with fewer than two values is hidden). A rebuild keeps each
-  // chip's current state; a new value starts from the saved filter state,
-  // or checked.
-  function buildChips(field, container, values, cls, dataKey, savedKey, current) {
-    const saved = savedFilterState()[savedKey] || {};
-    const previous = Object.fromEntries(current.map(cb => [cb.dataset[dataKey], cb.checked]));
-    container.replaceChildren();
-    const boxes = values.map(value => {
-      const label = document.createElement('label');
-      label.className = 'chip';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.className = cls;
-      cb.dataset[dataKey] = value;
-      cb.checked = value in previous ? previous[value] : value in saved ? saved[value] : true;
-      cb.addEventListener('change', onFilterChange);
-      label.append(cb, ` ${value}`);
-      container.appendChild(label);
-      return cb;
-    });
-    field.hidden = values.length < 2;
-    return values.length < 2 ? [] : boxes;
-  }
-
-  function rebuildChips() {
-    const distinct = key => Array.from(new Set(MATCHES.map(m => m[key] || 'Unknown'))).sort();
-    audioLanguageCheckboxes = buildChips(
-      document.getElementById('audio-field'), document.getElementById('audio-chips'),
-      distinct('audio_language'), 'filter-audio-language', 'lang', 'audioLanguages', audioLanguageCheckboxes);
-    formatCheckboxes = buildChips(
-      document.getElementById('format-field'), document.getElementById('format-chips'),
-      distinct('format'), 'filter-format', 'format', 'formats', formatCheckboxes);
-  }
-
-  redrawShowtimes = refresh;
-  applyMatches = (matches) => {
-    MATCHES = matches;
-    showsUi.hidden = !MATCHES.length;
-    emptyState.hidden = !!MATCHES.length;
-    rebuildChips();
-    refresh();
-  };
-  for (const input of [filterTimeFrom, filterTimeTo]) input.addEventListener('change', onFilterChange);
-  for (const b of sortButtons) b.addEventListener('click', () => { sortMode = b.dataset.sort; onFilterChange(); });
-  document.getElementById('filters-reset').addEventListener('click', resetFilters);
-  document.getElementById('no-results-reset').addEventListener('click', resetFilters);
-  document.getElementById('cal-prev').addEventListener('click', () => {
-    calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
-    selectedDayKey = null;
-    refresh();
-  });
-  document.getElementById('cal-next').addEventListener('click', () => {
-    calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
-    selectedDayKey = null;
-    refresh();
-  });
-  viewListBtn.addEventListener('click', () => setView('list'));
-  viewCalendarBtn.addEventListener('click', () => setView('calendar'));
-
-  loadFilterState();
-  view = initialView();
-  applyMatches(MATCHES);
-}
-</script>
+{# Everything movie.js needs from the server. #}
+<script type="application/json" id="movie-data">{{ {
+  'movie_id': movie.id,
+  'updated_at': updated_at,
+  'matches': matches,
+  'pick_mode': pick_mode,
+  'watch_rules': movie.watch_rules or [],
+  'picks': {
+    'dates': movie.watched_dates or [],
+    'ids': movie.watched_event_ids or [],
+    'off': movie.unwatched_event_ids or [],
+  },
+  'default_view': default_view,
+  'urls': {
+    'status': url_for('api_status') ~ '?movie_id=' ~ (movie.id | urlencode),
+    'matches': url_for('api_movie_matches', movie_id=movie.id),
+    'check_now': url_for('check_now'),
+    'watch': url_for('update_watched', movie_id=movie.id),
+    'seats': url_for('api_seat_map', movie_id=movie.id, event_id='EVENT_ID'),
+    'areas': url_for('update_seat_areas'),
+  },
+} | tojson }}</script>
+<script src="{{ asset('showtimes.js') }}"></script>
+<script src="{{ asset('movie.js') }}"></script>
 {% endblock %}

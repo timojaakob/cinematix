@@ -1,9 +1,16 @@
+{# The top bar. Pages before login or setup (_plain.html) include it with
+   plain=true: the brand doesn't link anywhere and there are no settings. #}
   <header class="topbar">
     <div class="topbar-inner">
+      {% if plain %}
+      <span class="brand">
+      {% else %}
       <a class="brand" href="{{ url_for('index') }}" aria-label="cinematix home">
+      {% endif %}
         <img class="brand-logo" src="{{ asset('logo.png') }}" alt="" width="36" height="36">
         <span class="brand-word">cinematix</span>
-      </a>
+      {% if plain %}</span>{% else %}</a>{% endif %}
+      {% if not plain %}
       <button id="global-settings-btn" type="button" class="icon-btn" aria-label="Settings" aria-haspopup="dialog" aria-controls="global-settings-overlay">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="4" y1="6" x2="20" y2="6"></line>
@@ -14,5 +21,6 @@
           <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"></circle>
         </svg>
       </button>
+      {% endif %}
     </div>
   </header>

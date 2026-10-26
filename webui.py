@@ -127,9 +127,22 @@ def template_helpers():
             version = 0
         return url_for("static", filename=filename, v=version)
 
-    settings = storage.load_config()["settings"]
+    config = storage.load_config()
+    settings = config["settings"]
+
+    def global_settings() -> dict:
+        """What the settings dialog on every app page needs. Called by the
+        dialog itself, so a new page doesn't have to pass anything."""
+        return {
+            "settings": page_settings(config),
+            "cinemas": cinema_list(),
+            "check_interval_options": CHECK_INTERVAL_OPTIONS,
+            "ntfy_priority_options": storage.NTFY_PRIORITY_OPTIONS,
+        }
+
     return {
         "asset": asset,
+        "global_settings": global_settings,
         "interval_labels": dict(CHECK_INTERVAL_OPTIONS),
         # "Prague Flora, OC FLORA" -> "Cinema City Prague Flora"
         "cinema_name": " ".join(["Cinema City", (settings.get("cinema_name") or "").split(",")[0]]).strip(),
@@ -167,6 +180,17 @@ def humandate(value: str | None, with_time: bool = False, with_year: bool = True
     if with_time:
         formatted += dt.strftime(" %H:%M")
     return formatted
+
+
+@app.template_filter("when")
+def when(value: str | None, fmt: str) -> str:
+    """An ISO date or time from results.json in strftime format."""
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).strftime(fmt)
+    except ValueError:
+        return value
 
 
 @app.template_filter("relativedate")
@@ -374,19 +398,153 @@ def seat_ratio(match: dict) -> float:
     return match.get("availability") or 0.0
 
 
-def card_status_tier(showtime_count: int, best_availability: float | None) -> str:
-    """Buckets a movie's current showtimes into a coarse status for the
-    monitored-movies grid, echoing the calendar view's colors."""
-    if showtime_count == 0:
+# --- Showtime status -------------------------------------------------------------
+# The one place for what a showtime shows: its tier (the green / amber / red
+# light), its seat text and whether it changed lately. The movie list, the
+# movie page's rows, its calendar and the tour all draw from these fields,
+# so a colour means the same thing on every screen.
+
+# Anything that displays as 0% free counts as sold out.
+SOLD_OUT_BELOW = 0.005
+SEAT_STRIP_LENGTH = 20
+HEAT_STRIP_DAYS = 14
+
+
+def tier_of_ratio(ratio: float | None) -> str:
+    if ratio is None:
         return "none"
-    # No free seat (in the seating areas) reads like sold out, as on the movie page.
-    if best_availability is None or best_availability < 0.005:
-        return "sold-out"
-    if best_availability >= 0.5:
+    if ratio < SOLD_OUT_BELOW:
+        return "sold"
+    if ratio >= 0.5:
         return "good"
-    if best_availability >= 0.15:
+    if ratio >= 0.15:
         return "fair"
     return "low"
+
+
+def sale_upcoming(match: dict, now_s: str) -> bool:
+    """sale_start is Prague local time without an offset, like now_s."""
+    return (match.get("sale_start") or "") > now_s
+
+
+def is_sold_out(match: dict, now_s: str) -> bool:
+    """A literal sold_out flag and anything that displays as 0% read the
+    same. Before booking opens, the low pre-sale ratio doesn't mean sold out."""
+    if sale_upcoming(match, now_s):
+        return False
+    availability = match.get("availability")
+    return bool(match.get("sold_out")) or (availability is not None and availability < SOLD_OUT_BELOW)
+
+
+def short_when(value: str) -> str:
+    """"2026-10-31T10:15:00" -> "Sat 31 Oct, 10:15"."""
+    return datetime.fromisoformat(value).strftime("%a %-d %b, %H:%M")
+
+
+def lit_seats(ratio: float | None) -> int:
+    """How many of the seat strip's 20 seats are lit: at least one while
+    any seat is free."""
+    if ratio is None or ratio < SOLD_OUT_BELOW:
+        return 0
+    return max(1, int(ratio * SEAT_STRIP_LENGTH + 0.5))
+
+
+def showtime_view(match: dict, now: datetime) -> dict:
+    """A showtime from results.json plus what the pages show for it."""
+    now_s = now.isoformat(timespec="seconds")
+    upcoming = sale_upcoming(match, now_s)
+    sold = is_sold_out(match, now_s)
+    ratio = match["seat_ratio"] if match.get("seat_ratio") is not None else match.get("availability")
+    tier = "upcoming" if upcoming else "sold" if sold else tier_of_ratio(ratio)
+    if upcoming:
+        text = f"Opens {short_when(match['sale_start'])}"
+    elif sold:
+        text = "Sold out"
+    elif match.get("free_seats") is not None:
+        text = f"{match['free_seats']} of {match.get('capacity')} {'in your area' if match.get('in_areas') else 'free'}"
+    elif match.get("availability") is not None:
+        text = f"{round(match['availability'] * 100)}% free"
+    else:
+        text = "Seats unknown"
+    is_new = not sold and is_new_showtime(match, now)
+    freed = 0 if sold else (match.get("freed_seats") or 0)
+    return {
+        **match,
+        "tier": tier,
+        "sale_upcoming": upcoming,
+        "sold": sold,
+        "ratio": ratio,
+        "lit": 0 if tier in ("upcoming", "sold") else lit_seats(ratio),
+        "seat_text": text,
+        "is_new": is_new,
+        "freed": freed,
+        "changed": is_new or freed > 0,
+    }
+
+
+def is_open(view: dict) -> bool:
+    """On sale, not sold out, and with a known share of free seats."""
+    return not view["sale_upcoming"] and not view["sold"] and view["ratio"] is not None
+
+
+def day_tier(views: list[dict]) -> str:
+    """A day's light: its best open showtime, else "upcoming" while
+    booking hasn't opened for any of them, else sold out."""
+    open_views = [v for v in views if is_open(v)]
+    if not open_views:
+        return "upcoming" if any(v["sale_upcoming"] for v in views) else "sold"
+    return max(open_views, key=lambda v: v["ratio"])["tier"]
+
+
+def card_status_tier(showtime_count: int, best_availability: float | None) -> str:
+    """A movie's light on the movie list: its best open showtime. No free
+    seat (in the seating areas) reads like sold out, as on the movie page."""
+    if showtime_count == 0:
+        return "none"
+    if best_availability is None:
+        return "sold"
+    return tier_of_ratio(best_availability)
+
+
+def movie_card(movie: dict, matches: list[dict], state: dict, now: datetime) -> dict:
+    """One movie on the movie list: its light, counts, badges, and for the
+    desktop board its next bookable showtimes and the next two weeks."""
+    views = sorted((showtime_view(m, now) for m in matches), key=lambda v: v.get("start_time") or "")
+    upcoming = [v for v in views if v["sale_upcoming"]]
+    open_views = [v for v in views if is_open(v)]
+    best = max(open_views, key=lambda v: v["ratio"], default=None)
+    best_ratio = best["ratio"] if best else None
+    by_day: dict[str, list[dict]] = {}
+    for v in views:
+        by_day.setdefault((v.get("start_time") or "")[:10], []).append(v)
+    days = []
+    for i in range(HEAT_STRIP_DAYS):
+        day = now.date() + timedelta(days=i)
+        shows = by_day.get(day.isoformat(), [])
+        days.append({
+            "date": day.isoformat(),
+            "label": day.strftime("%a %-d %b"),
+            "tier": day_tier(shows) if shows else "empty",
+            "count": len(shows),
+        })
+    next_sale_start = min((v["sale_start"] for v in upcoming), default=None)
+    return {
+        **movie,
+        "last_checked_at": storage.last_checked_at(movie, state),
+        "showtime_count": len(views),
+        "open_count": len(open_views),
+        "upcoming_count": len(upcoming),
+        "next_sale_start": datetime.fromisoformat(next_sale_start) if next_sale_start else None,
+        "new_count": sum(1 for v in open_views if v["is_new"]),
+        "freed_seats": sum(v["freed"] for v in open_views),
+        "best_availability": best_ratio,
+        "best_lit": lit_seats(best_ratio),
+        "best_free_seats": best.get("free_seats") if best else None,
+        "best_in_areas": bool(best and best.get("in_areas")),
+        "status_tier": card_status_tier(len(views), best_ratio),
+        "next_shows": [v for v in open_views if v["tier"] != "sold"][:3],
+        "days": days,
+    }
 
 
 def tmdb_search(query: str) -> list[dict]:
@@ -576,40 +734,10 @@ def index():
         matches_by_movie.setdefault(m["movie_id"], []).append(m)
 
     now = cinemacity.now()
-    now_s = now.isoformat(timespec="seconds")
-    movies = []
-    for movie in config["movies"]:
-        movie_matches = matches_by_movie.get(movie["id"], [])
-        upcoming = [m for m in movie_matches if (m.get("sale_start") or "") > now_s]
-        # Same "displays as 0%" rule as the movie page's sold-out check.
-        open_matches = [
-            m for m in movie_matches
-            if m not in upcoming
-            and not m.get("sold_out") and m.get("availability") is not None and m["availability"] >= 0.005
-        ]
-        next_sale_start = min((m["sale_start"] for m in upcoming), default=None)
-        freed_seats = sum(m.get("freed_seats") or 0 for m in open_matches)
-        # Free seats in the seating areas where the seats are known, else
-        # the feed's share of the whole hall.
-        best = max(open_matches, key=seat_ratio, default=None)
-        best_availability = seat_ratio(best) if best else None
-        showtime_count = len(movie_matches)
-        movies.append(
-            {
-                **movie,
-                "last_checked_at": storage.last_checked_at(movie, state),
-                "showtime_count": showtime_count,
-                "open_count": len(open_matches),
-                "upcoming_count": len(upcoming),
-                "next_sale_start": datetime.fromisoformat(next_sale_start) if next_sale_start else None,
-                "new_count": sum(1 for m in open_matches if is_new_showtime(m, now)),
-                "freed_seats": freed_seats,
-                "best_availability": best_availability,
-                "best_free_seats": best.get("free_seats") if best else None,
-                "best_in_areas": bool(best and best.get("in_areas")),
-                "status_tier": card_status_tier(showtime_count, best_availability),
-            }
-        )
+    movies = [movie_card(movie, matches_by_movie.get(movie["id"], []), state, now) for movie in config["movies"]]
+    # Movies with new showtimes or freed seats come first, so the one a
+    # push was about is at the top. Otherwise the order they were added in.
+    movies.sort(key=lambda m: not (m["new_count"] or m["freed_seats"]))
 
     return render_template(
         "index.html",
@@ -617,10 +745,6 @@ def index():
         show_tour=not config["settings"].get("tour_seen") or request.args.get("tour") == "1",
         movies=movies,
         all_formats=storage.FORMAT_OPTIONS,
-        settings=page_settings(config),
-        cinemas=cinema_list(),
-        check_interval_options=CHECK_INTERVAL_OPTIONS,
-        ntfy_priority_options=storage.NTFY_PRIORITY_OPTIONS,
         # Lets the search dropdown flag results already being monitored,
         # since re-adding one silently resets its check interval/formats/
         # history (storage.add_movie() overwrites by id) - see movie-search.
@@ -690,14 +814,15 @@ def movie_detail(movie_id):
         updated_at=storage.last_checked_at(movie, storage.load_state()),
         check_interval_options=CHECK_INTERVAL_OPTIONS,
         max_party_size=seats.MAX_PARTY_SIZE,
-        settings=page_settings(config),
-        cinemas=cinema_list(),
-        ntfy_priority_options=storage.NTFY_PRIORITY_OPTIONS,
+        default_view=config["settings"].get("default_view", "list"),
     )
 
 
 def movie_matches(movie_id: str) -> list[dict]:
-    return [m for m in storage.load_results()["matches"] if m["movie_id"] == movie_id]
+    """The movie's showtimes with what the page shows for each, by start."""
+    now = cinemacity.now()
+    views = [showtime_view(m, now) for m in storage.load_results()["matches"] if m["movie_id"] == movie_id]
+    return sorted(views, key=lambda v: v.get("start_time") or "")
 
 
 @app.route("/api/movies/<movie_id>/matches", methods=["GET"])

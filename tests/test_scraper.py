@@ -11,9 +11,9 @@ from conftest import load_fixture
 NOW = datetime(2026, 10, 21, 14, 0)
 
 
-def show(eid, avail, sold=False, sale_start=None, start="2026-12-18T20:30:00"):
+def show(eid, avail, sold=False, sale_start=None, start="2026-12-18T20:30:00", movie_id="tmdb-1"):
     return {
-        "event_id": eid, "movie_name": "Dune: Part Three", "format": "IMAX", "date": start[:10],
+        "event_id": eid, "movie_id": movie_id, "movie_name": "Dune: Part Three", "format": "IMAX", "date": start[:10],
         "start_time": start, "availability": avail, "sold_out": sold, "sale_start": sale_start,
         "booking_link": f"https://tickets.cinemacity.cz/order/{eid}",
     }
@@ -63,10 +63,16 @@ def test_summaries():
 def test_push_links_single_showtime_to_booking_page(monkeypatch):
     sent = []
     monkeypatch.setattr(scraper, "notify", lambda t, m, url, p, s: sent.append(url) or True)
-    settings = {"public_url": "https://app.example"}
+    settings = {"public_url": "https://app.example/"}
     scraper.push_picks([show("1", 0.5)], "new", settings, NOW)
     scraper.push_picks([show("1", 0.5), show("2", 0.5)], "new", settings, NOW)
-    assert sent == ["https://tickets.cinemacity.cz/order/1", "https://app.example"]
+    scraper.push_picks([show("1", 0.5), show("2", 0.5, movie_id="tmdb-2")], "new", settings, NOW)
+    assert sent == [
+        "https://tickets.cinemacity.cz/order/1",
+        "https://app.example/movies/tmdb-1?changed=1",  # one movie: its page, changes on top
+        "https://app.example/",  # several movies: the movie list
+    ]
+    assert scraper.push_link([show("1", 0.5), show("2", 0.5)], {}) is None
 
 
 def test_disabled_push_still_marks_notified(monkeypatch):
