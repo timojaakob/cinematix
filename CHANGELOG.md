@@ -5,6 +5,7 @@
 First release that is set up fully in the web UI.
 
 ### Added
+- A five-step tour after setup that introduces showtimes, the seat map, seating areas and pushes. It can be opened again from Settings.
 - First-run setup wizard: cinema, TMDb key (with a live check), a generated private ntfy topic with QR code and test push, and an optional password.
 - Every Cinema City cinema in Czechia, chosen in setup or settings. Changing it clears the old cinema's showtimes and notification history.
 - Formats 4DX, Superscreen and VIP, next to IMAX, 3D and 2D.

@@ -82,6 +82,8 @@ DEFAULT_SETTINGS = {
     "notify_on_more_seats_priority": "urgent",
     "default_check_interval_seconds": DEFAULT_CHECK_INTERVAL_SECONDS,
     "default_view": "list",
+    # The introduction tour on the home page opens once, after setup.
+    "tour_seen": False,
 }
 
 

@@ -365,4 +365,5 @@ document.addEventListener('visibilitychange', () => {
   row.addEventListener('animationend', () => row.classList.remove('just-added'), { once: true });
 })();
 </script>
+{% if show_tour %}{% include "_tour.html" %}{% endif %}
 {% endblock %}

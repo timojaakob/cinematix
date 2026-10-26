@@ -70,6 +70,8 @@ The wizard opens on the first visit and has four steps. Everything can be change
 
 Then search for a movie, choose the formats you want (IMAX, 4DX, Superscreen, VIP, 3D, 2D), and cinematix starts checking.
 
+After setup, a short tour explains showtimes, the seat map, seating areas and the freed-seats push. Open it again under **Settings → Show the tour**.
+
 ## Freed seats
 
 Each showtime shows its free seats inside your seating areas, for example "13 of 144 in your area" (in a hall without areas: "59 of 379 free"). The seat strip, its colour, the filters, the sorting and the movie cards use the same count. Wheelchair spaces are shown in blue on the seat map and never counted. Tap the count to open the seat map. It shows which seats are free, which were freed in the last 24 hours, where your group fits, and your seating areas. Showtimes and movie cards with freed seats get a "+3 freed" badge.

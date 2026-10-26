@@ -269,3 +269,11 @@ def test_pages_show_freed_seats(client):
     assert "+3 seats freed" in client.get("/").get_data(as_text=True)
     page = client.get("/movies/m").get_data(as_text=True)
     assert "showtimes from 0 rules and the bells" in page
+
+
+def test_tour_opens_once_and_on_request(client):
+    finish_setup(client)
+    assert 'id="tour-overlay"' in client.get("/").get_data(as_text=True)
+    client.post("/settings/tour-seen", headers=SAME_ORIGIN)
+    assert 'id="tour-overlay"' not in client.get("/").get_data(as_text=True)
+    assert 'id="tour-overlay"' in client.get("/?tour=1").get_data(as_text=True)

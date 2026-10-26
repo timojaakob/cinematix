@@ -379,7 +379,8 @@ def card_status_tier(showtime_count: int, best_availability: float | None) -> st
     monitored-movies grid, echoing the calendar view's colors."""
     if showtime_count == 0:
         return "none"
-    if best_availability is None:
+    # No free seat (in the seating areas) reads like sold out, as on the movie page.
+    if best_availability is None or best_availability < 0.005:
         return "sold-out"
     if best_availability >= 0.5:
         return "good"
@@ -612,6 +613,8 @@ def index():
 
     return render_template(
         "index.html",
+        # Once after setup, or again from the "Show the tour" link in settings.
+        show_tour=not config["settings"].get("tour_seen") or request.args.get("tour") == "1",
         movies=movies,
         all_formats=storage.FORMAT_OPTIONS,
         settings=page_settings(config),
@@ -894,6 +897,13 @@ def update_global_settings():
     if cinema_changed:
         trigger_check()
     return redirect(_safe_next(form.get("next")))
+
+
+@app.route("/settings/tour-seen", methods=["POST"])
+def tour_seen():
+    """The tour was finished or closed: don't open it on its own again."""
+    storage.update_settings(storage.load_config(), {"tour_seen": True})
+    return jsonify({"ok": True})
 
 
 @app.route("/settings/test-notification", methods=["POST"])

@@ -1,0 +1,148 @@
+{# Introduction tour on the home page: five steps, each with a small example
+   built from the app's own parts, so it works before any movie is added.
+   Opens once after setup (settings.tour_seen) or from Settings → Show the tour. #}
+<div id="tour-overlay" class="modal-overlay">
+  <div class="modal tour" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-text">
+    <div class="modal-header">
+      <span id="tour-count" class="tour-count" aria-live="polite"></span>
+      <button id="tour-close-btn" type="button" class="icon-btn" aria-label="Close the tour">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    {# 1. New showtimes #}
+    <section class="tour-step" data-title="Get a push when showtimes appear">
+      <div class="tour-stage" aria-hidden="true">
+        <div class="tour-push">
+          <img src="{{ asset('favicon.png') }}" alt="" width="36" height="36">
+          <div>
+            <div class="tour-push-head"><strong>1 new showtime listed, booking not open yet</strong><span>now</span></div>
+            <p>Dune: Part Three: 1, booking opens Fri 18 Dec 09:00</p>
+          </div>
+        </div>
+      </div>
+      <p class="tour-text">Search for a movie above and choose the formats you want, for example IMAX. cinematix checks {{ cinema_name }} on its own and sends a push to your phone when a showtime is listed, with the time booking opens.</p>
+    </section>
+
+    {# 2. A showtime row #}
+    <section class="tour-step" data-title="Read a showtime" hidden>
+      <div class="tour-stage" aria-hidden="true">
+        <article class="show tour-show">
+          <div class="show-time">20:30</div>
+          <div class="show-info"><span class="hall">IMAX VOLVO</span><span class="badge-new">New</span><span class="badge-freed">+2 freed</span></div>
+          <div class="show-seats">
+            {%- set lit = 2 -%}
+            <span class="seats low">{% for i in range(20) %}<i{% if i < lit %} class="on"{% endif %}></i>{% endfor %}</span>
+            <span class="seat-label tier-low seat-map-btn">13 of 144 in your area</span>
+          </div>
+          <div class="show-book"><span class="btn">Book</span></div>
+        </article>
+      </div>
+      <p class="tour-text">Each showtime counts the free seats in your seating area. "+2 freed" marks seats that came back in the last 24 hours, and "New" a showtime first seen today. <strong>Book</strong> opens Cinema City's booking page; cinematix never buys tickets itself.</p>
+    </section>
+
+    {# 3. Seat map and areas #}
+    <section class="tour-step" data-title="Mark where you want to sit" hidden>
+      <div class="tour-stage" aria-hidden="true">
+        <div class="seatmap tour-seatmap" style="--cols: 18">
+          <div class="seatmap-screen">Screen</div>
+          {% for y in range(1, 9) %}
+            <span class="seatmap-row-name" style="grid-row: {{ y + 1 }}">{{ y }}</span>
+            {% for x in range(1, 19) %}
+              {% set inside = 2 <= y <= 7 and 4 <= x <= 15 %}
+              {% set free = (x * 7 + y * 5) % 9 < 3 or (y == 4 and 8 <= x <= 9) %}
+              <i class="{{ 'free' if free else 'taken' }}{{ ' fits' if y == 4 and 8 <= x <= 9 }}{{ ' outside' if not inside }}" style="grid-row: {{ y + 1 }}; grid-column: {{ x + 1 }}"></i>
+            {% endfor %}
+          {% endfor %}
+          <div class="seatmap-area preferred" style="grid-row: 4 / 7; grid-column: 7 / 15"></div>
+          <div class="seatmap-area acceptable" style="grid-row: 3 / 9; grid-column: 5 / 17"></div>
+        </div>
+      </div>
+      <p class="tour-text">Tap a seat count to open the seat map. Green is your preferred area and yellow is acceptable; seats outside them never count. Draw your own areas for each hall with <strong>Edit seating areas</strong>.</p>
+    </section>
+
+    {# 4. Freed seats #}
+    <section class="tour-step" data-title="Get a push when seats free up" hidden>
+      <div class="tour-stage" aria-hidden="true">
+        <div class="tour-push">
+          <img src="{{ asset('favicon.png') }}" alt="" width="36" height="36">
+          <div>
+            <div class="tour-push-head"><strong>Seats freed up in 1 showtime</strong><span>now</span></div>
+            <p>Dune: Part Three IMAX, Sat 19 Dec 20:40: +2 seats in your areas, 9 free now. 2 together in the preferred area: row 6, seats 20-21</p>
+          </div>
+        </div>
+      </div>
+      <p class="tour-text">In a movie's settings, set how many seats you need together. You get a push when a freed seat lets your group sit together in your areas. Two or three sit in one row; four or more can also sit two rows deep, one directly behind the other.</p>
+    </section>
+
+    {# 5. Which showtimes #}
+    <section class="tour-step" data-title="Choose which showtimes count" hidden>
+      <div class="tour-stage tour-stage-rules" aria-hidden="true">
+        <div class="day-head"><h3>Friday 18 December</h3><span class="day-count">3 showtimes</span>
+          <span class="icon-btn bell on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+        </div>
+        <div class="watch-rules-add">
+          <span class="chip-btn">Weekday evenings</span>
+          <span class="chip-btn">Weekends</span>
+          <span class="chip-btn">Date range</span>
+        </div>
+      </div>
+      <p class="tour-text">Every showtime can send a freed-seats push. To narrow it down, switch a movie to <strong>Custom</strong> in its settings: add rules like weekday evenings or weekends, and tap the bells to add or leave out single dates and showtimes.</p>
+    </section>
+
+    <h2 id="tour-title" class="tour-title"></h2>
+    <div id="tour-text"></div>
+
+    <div class="modal-actions tour-actions">
+      <button type="button" id="tour-back-btn" class="link-btn">Back</button>
+      <button type="button" id="tour-next-btn" class="btn btn-primary-wide">Next</button>
+    </div>
+    <p class="hint tour-later">Open this tour again any time under Settings.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  const overlay = document.getElementById('tour-overlay');
+  const steps = Array.from(overlay.querySelectorAll('.tour-step'));
+  const title = document.getElementById('tour-title');
+  const text = document.getElementById('tour-text');
+  const count = document.getElementById('tour-count');
+  const back = document.getElementById('tour-back-btn');
+  const next = document.getElementById('tour-next-btn');
+  let index = 0;
+
+  // The visible step's text moves into the shared title and description,
+  // so the dialog's aria-labelledby/-describedby always read the current step.
+  function show(i) {
+    index = i;
+    steps.forEach((s, n) => { s.hidden = n !== i; });
+    title.textContent = steps[i].dataset.title;
+    text.replaceChildren(steps[i].querySelector('.tour-text').cloneNode(true));
+    count.textContent = `${i + 1} of ${steps.length}`;
+    back.hidden = i === 0;
+    next.textContent = i === steps.length - 1 ? 'Add a movie' : 'Next';
+  }
+
+  function close(focusSearch) {
+    overlay.classList.remove('open');
+    fetch('{{ url_for("tour_seen") }}', { method: 'POST' }).catch(() => {});
+    if (location.search.includes('tour=1')) history.replaceState(null, '', location.pathname);
+    if (focusSearch) document.getElementById('movie-search').focus();
+  }
+
+  back.addEventListener('click', () => show(Math.max(index - 1, 0)));
+  next.addEventListener('click', () => (index === steps.length - 1 ? close(true) : show(index + 1)));
+  document.getElementById('tour-close-btn').addEventListener('click', () => close(false));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+  document.addEventListener('keydown', (e) => {
+    if (!overlay.classList.contains('open')) return;
+    if (e.key === 'Escape') close(false);
+    if (e.key === 'ArrowRight' && index < steps.length - 1) show(index + 1);
+    if (e.key === 'ArrowLeft' && index > 0) show(index - 1);
+  });
+
+  show(0);
+  openSheet(overlay);
+})();
+</script>

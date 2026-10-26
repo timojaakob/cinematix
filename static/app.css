@@ -168,6 +168,7 @@ img { display: block; max-width: 100%; }
   color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; font-size: 0.9rem;
 }
 .link-btn:hover { color: var(--text); }
+a.link-btn { display: inline-flex; align-items: center; }
 
 input[type="text"], input[type="search"], input[type="password"], input[type="time"], input[type="date"], select {
   min-height: 44px; width: 100%;
@@ -671,3 +672,51 @@ html:not(.steps-js) #step-next, html:not(.steps-js) #step-back { display: none; 
 }
 .chip-btn:hover { color: var(--text); border-style: solid; }
 #watch-rules { display: grid; gap: 10px; }
+
+/* ---------- tour (home page, once after setup) ----------
+   Each step shows a small example built from the app's own parts on a
+   "stage", so it reads like the real screens it introduces. */
+.modal.tour { display: flex; flex-direction: column; }
+@media (min-width: 760px) { .modal.tour { max-width: 520px; } }
+.tour .modal-header { margin-bottom: 8px; }
+.tour-count { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tour-step .tour-text { display: none; }
+.tour-stage {
+  display: grid; place-items: center; min-height: 196px; padding: 20px 16px;
+  border-radius: 14px; background: var(--bg); border: 1px solid var(--line);
+  overflow: hidden;
+}
+.tour-title { margin: 20px 0 6px; font: 700 1.35rem/1.25 var(--display); }
+#tour-text p { margin: 0; color: var(--text-2); line-height: 1.55; max-width: 60ch; }
+#tour-text strong { color: var(--text); font-weight: 600; }
+/* Back and Next stay on one row on phones too, so Next never moves. */
+.tour-actions { margin-top: 20px; flex-wrap: nowrap; }
+.tour-actions .btn { order: 0; flex: 0 1 auto; min-width: 9rem; margin-left: auto; }
+@media (max-width: 759px) { .tour-actions .btn { flex: 1 1 auto; } }
+/* The same height for every step: the longest text is five lines on a phone. */
+#tour-text { min-height: calc(5 * 1.55em); }
+.tour-later { margin: 10px 0 0; }
+
+/* A push as it lands on a phone's lock screen. */
+.tour-push {
+  display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start;
+  width: 100%; max-width: 360px; padding: 12px 14px; border-radius: 18px;
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+}
+.tour-push img { width: 36px; height: 36px; border-radius: 9px; }
+.tour-push-head { display: flex; justify-content: space-between; gap: 10px; font-size: 0.88rem; }
+.tour-push-head span { color: var(--muted); font-size: 0.78rem; flex-shrink: 0; }
+.tour-push p { margin: 3px 0 0; font-size: 0.85rem; line-height: 1.4; color: var(--text-2); }
+
+.tour-show { width: 100%; padding: 0; border-bottom: 0; }
+.tour-show .btn, .tour-show .seat-map-btn { pointer-events: none; }
+.tour-seatmap { grid-template-columns: 1.4rem repeat(var(--cols), minmax(5px, 13px)); }
+.tour-stage-rules { gap: 14px; align-content: center; }
+.tour-stage-rules .day-head { position: static; width: 100%; min-width: 260px; justify-content: flex-start; background: none; }
+.tour-stage-rules .day-count { margin-left: auto; }
+.tour-stage-rules .bell { pointer-events: none; }
+@media (min-width: 760px) {
+  .tour-show { grid-template-columns: 5rem minmax(0, 1fr) auto; grid-template-areas: "time info book" "seats seats seats"; }
+  #tour-text { min-height: calc(4 * 1.55em); }
+}
