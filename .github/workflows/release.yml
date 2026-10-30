@@ -2,8 +2,7 @@ name: Release
 
 # Builds the image for amd64 and arm64 on every version tag (v1.0.0, ...) and
 # pushes it to ghcr.io/<owner>/cinematix. The package is linked to this repo
-# through the image's source label, so it has the repo's visibility: private
-# while the repo is private.
+# through the image's source label and is public, so pulls need no login.
 
 on:
   push:

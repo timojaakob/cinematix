@@ -19,15 +19,7 @@ cinematix only watches and notifies. It never selects seats or buys tickets.
 
 You need a computer that is always on and has [Docker](https://docs.docker.com/engine/install/) installed, for example a home server, a NAS or a Raspberry Pi (64-bit).
 
-The image is private, so Docker must log in to GitHub once before the first download.
-
-1. Create a [GitHub personal access token (classic)](https://github.com/settings/tokens/new?scopes=read:packages&description=cinematix) with only the `read:packages` scope.
-2. Log in on the server once:
-   ```sh
-   echo <token> | docker login ghcr.io -u <github-user> --password-stdin
-   ```
-   Docker remembers the login, so later updates need no login.
-3. Save this as `docker-compose.yml` (it is also in this repository), then run `docker compose up -d`:
+1. Save this as `docker-compose.yml` (it is also in this repository), then run `docker compose up -d`:
    ```yaml
    services:
      cinematix:
@@ -42,11 +34,9 @@ The image is private, so Docker must log in to GitHub once before the first down
    volumes:
      cinematix-data:
    ```
-4. Open `http://<server>:8090` and complete the setup wizard.
+2. Open `http://<server>:8090` and complete the setup wizard.
 
-If step 3 fails with `denied` or `unauthorized`, Docker is not logged in. Do step 2 again.
-
-Without Compose, this one command does the same as step 3:
+Without Compose, this one command does the same as step 1:
 
 ```sh
 docker run -d --name cinematix --restart unless-stopped -p 8090:5000 -v cinematix-data:/data ghcr.io/timojaakob/cinematix:1
